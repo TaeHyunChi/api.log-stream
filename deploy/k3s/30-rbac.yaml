@@ -143,3 +143,36 @@ subjects:
   - kind: ServiceAccount
     name: log-stream-service
     namespace: oncloud-ai
+---
+# 플랫폼 네임스페이스 — 클러스터 관리(리소스 브라우저)가 플랫폼 서비스 Pod 의
+# 로그를 본다. kube-system 은 여전히 뺀다(허용 목록의 이유 그대로).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai
+  labels:
+    app.kubernetes.io/name: log-stream-service
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai
+  labels:
+    app.kubernetes.io/name: log-stream-service
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: log-stream-reader
+subjects:
+  - kind: ServiceAccount
+    name: log-stream-service
+    namespace: oncloud-ai
