@@ -130,3 +130,67 @@ def test_read_timeout_is_unset_after_connecting():
 def test_unset_read_timeout_tolerates_a_missing_socket():
     """소켓을 못 찾아도 죽지 않는다 — 끊김이 보일 뿐 중계는 계속돼야 한다."""
     kube._unset_read_timeout(object())
+
+
+# --------------------------------------------------------------------------- #
+# Pod 상태 확인 — 스트림을 열기 전에 "접속해도 되는가" 를 서버가 판단한다
+# --------------------------------------------------------------------------- #
+def _status(client, query):
+    return client.get(f"/api/v1/logs/pod-status?{query}")
+
+
+def test_pod_status_requires_namespace_and_pod(client):
+    assert _status(client, "namespace=oncloud-ai-devops-service").status_code == 400
+    assert _status(client, "pod=p").status_code == 400
+
+
+def test_pod_status_refuses_namespaces_outside_the_allowlist(client):
+    res = _status(client, "namespace=kube-system&pod=etcd-0")
+    assert res.status_code == 403
+    assert "kube-system" not in res.get_json()["message"]
+
+
+def test_pod_status_outside_cluster_is_502(client):
+    res = _status(client, "namespace=oncloud-ai-devops-service&pod=p")
+    assert res.status_code == 502
+
+
+def test_missing_pod_is_not_available(client, monkeypatch):
+    """사라진 Pod 는 exists/available 이 false — 화면은 상태 정보만 그린다."""
+    monkeypatch.setattr(logs, "in_cluster", lambda: True)
+    monkeypatch.setattr(logs, "pod_status", lambda ns, pod: None)
+    body = _status(client, "namespace=oncloud-ai-devops-service&pod=gone").get_json()
+    assert body["exists"] is False
+    assert body["available"] is False
+    assert body["message"]
+
+
+def test_running_pod_is_available(client, monkeypatch):
+    monkeypatch.setattr(logs, "in_cluster", lambda: True)
+    monkeypatch.setattr(
+        logs,
+        "pod_status",
+        lambda ns, pod: {
+            "phase": "Running", "ready": True,
+            "startedAt": "2026-07-30T01:00:00Z", "reason": "",
+        },
+    )
+    body = _status(client, "namespace=oncloud-ai-devops-service&pod=web-1").get_json()
+    assert body["exists"] is True and body["available"] is True
+    assert body["phase"] == "Running" and body["ready"] is True
+
+
+def test_terminated_pod_still_offers_logs(client, monkeypatch):
+    """Succeeded/Failed 라도 오브젝트가 남아 있으면 로그는 읽을 수 있다."""
+    monkeypatch.setattr(logs, "in_cluster", lambda: True)
+    monkeypatch.setattr(
+        logs,
+        "pod_status",
+        lambda ns, pod: {
+            "phase": "Failed", "ready": False,
+            "startedAt": "2026-07-30T01:00:00Z", "reason": "Error",
+        },
+    )
+    body = _status(client, "namespace=oncloud-ai-devops-service&pod=done").get_json()
+    assert body["available"] is True
+    assert body["message"] == "Error"

@@ -8,6 +8,7 @@
 죽을 때까지 돌아오지 않는다.
 """
 
+import json
 import logging
 import os
 import ssl
@@ -40,6 +41,57 @@ def _request(path: str) -> urllib.request.Request:
     with open(TOKEN_PATH, encoding="utf-8") as handle:
         request.add_header("Authorization", f"Bearer {handle.read().strip()}")
     return request
+
+
+def pod_status(namespace: str, pod: str) -> dict | None:
+    """Pod 한 개의 현재 상태. 없으면(삭제됐으면) None.
+
+    로그/터미널을 열기 전의 **상태 확인**에 쓴다 — 이미 사라진 Pod 에 스트림을
+    열려고 하면 사용자에게는 원인 없는 연결 실패로만 보인다. 먼저 물어보고,
+    없으면 화면이 상태 정보만 그리게 한다.
+    """
+    path = (
+        f"/api/v1/namespaces/{urllib.parse.quote(namespace)}"
+        f"/pods/{urllib.parse.quote(pod)}"
+    )
+    context = ssl.create_default_context(cafile=CA_PATH)
+    timeout = current_app.config["K8S_CONNECT_TIMEOUT"]
+    try:
+        with urllib.request.urlopen(  # noqa: S310
+            _request(path), timeout=timeout, context=context
+        ) as response:
+            body = json.loads(response.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        if exc.code in (401, 403):
+            raise KubeError("이 Pod 를 조회할 권한이 없습니다.") from None
+        raise KubeError(f"Pod 상태를 가져오지 못했습니다({exc.code}).") from None
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        log.warning("Pod 상태 조회 실패: %s/%s %s", namespace, pod, exc)
+        raise KubeError("k8s API 에 연결할 수 없습니다.") from None
+
+    status = body.get("status") or {}
+    conditions = status.get("conditions") or []
+    ready = any(
+        c.get("type") == "Ready" and c.get("status") == "True"
+        for c in conditions
+        if isinstance(c, dict)
+    )
+    # 왜 안 뜨는지(CrashLoopBackOff 같은 것)는 컨테이너 상태에 들어 있다.
+    reason = ""
+    for cs in status.get("containerStatuses") or []:
+        state = (cs or {}).get("state") or {}
+        waiting = state.get("waiting") or {}
+        terminated = state.get("terminated") or {}
+        reason = waiting.get("reason") or terminated.get("reason") or reason
+
+    return {
+        "phase": status.get("phase") or "",
+        "ready": ready,
+        "startedAt": status.get("startTime") or "",
+        "reason": reason,
+    }
 
 
 def log_url(namespace: str, pod: str, *, container: str = "", since: str = "", tail: int = 0) -> str:

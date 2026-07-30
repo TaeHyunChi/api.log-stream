@@ -44,7 +44,7 @@ spec:
         runAsGroup: 1000
       containers:
         - name: log-stream-service
-          image: oncloud-ai.co.kr:5000/oncloud-ai/log-stream-service:0.1.1
+          image: oncloud-ai.co.kr:5000/oncloud-ai/log-stream-service:0.1.2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

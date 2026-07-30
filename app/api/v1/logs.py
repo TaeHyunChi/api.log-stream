@@ -24,8 +24,8 @@ import threading
 
 from flask import Blueprint, current_app, request
 
-from ...auth import subject_from_query
-from ...kube import KubeError, in_cluster, split_timestamp, stream_lines
+from ...auth import subject_from_query, subject_from_request
+from ...kube import KubeError, in_cluster, pod_status, split_timestamp, stream_lines
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +40,59 @@ _QUEUE_SIZE = 1000
 def allowed_namespaces():
     """로그를 읽을 수 있는 네임스페이스 목록 — 화면이 고를 수 있게."""
     return {"items": list(current_app.config["ALLOWED_NAMESPACES"])}
+
+
+@bp.get("/pod-status")
+def get_pod_status():
+    """스트림을 열기 전의 Pod 상태 확인.
+
+    "접속해도 되는가" 의 판단(`available`)을 **여기서** 내린다 — 화면마다 제각기
+    판단하면 MFE 가 늘 때마다 규칙이 갈라진다. 로그는 Pod 오브젝트가 남아 있는 한
+    (Succeeded/Failed 포함) 읽을 수 있으므로 `exists` 가 곧 `available` 이다.
+
+        { "name", "namespace", "exists", "phase", "ready",
+          "startedAt", "message", "available" }
+    """
+    if not subject_from_request():
+        return {"code": "UNAUTHORIZED", "message": "인증이 필요합니다."}, 401
+
+    namespace = (request.args.get("namespace") or "").strip()
+    pod = (request.args.get("pod") or request.args.get("podId") or "").strip()
+    if not namespace or not pod:
+        return {"code": "BAD_REQUEST", "message": "namespace 와 pod 는 필수입니다."}, 400
+    if namespace not in current_app.config["ALLOWED_NAMESPACES"]:
+        # 어떤 네임스페이스가 있는지는 알려 주지 않는다.
+        return {"code": "FORBIDDEN", "message": "이 네임스페이스는 조회할 수 없습니다."}, 403
+    if not in_cluster():
+        return {"code": "K8S_UNAVAILABLE", "message": "클러스터 밖에서는 조회할 수 없습니다."}, 502
+
+    try:
+        status = pod_status(namespace, pod)
+    except KubeError as exc:
+        return {"code": "K8S_UNAVAILABLE", "message": str(exc)}, 502
+
+    if status is None:
+        return {
+            "name": pod,
+            "namespace": namespace,
+            "exists": False,
+            "phase": "",
+            "ready": False,
+            "startedAt": "",
+            "message": "Pod 를 찾을 수 없습니다. 이미 종료된 배포의 Pod 는 클러스터에 남아 있지 않습니다.",
+            "available": False,
+        }
+
+    return {
+        "name": pod,
+        "namespace": namespace,
+        "exists": True,
+        "phase": status["phase"],
+        "ready": status["ready"],
+        "startedAt": status["startedAt"],
+        "message": status["reason"],
+        "available": True,
+    }
 
 
 def _send(ws, payload: dict) -> None:

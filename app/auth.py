@@ -16,10 +16,25 @@ log = logging.getLogger(__name__)
 
 def subject_from_query() -> str | None:
     """접속한 사용자 id. 검증에 실패하면 None."""
+    return _subject((request.args.get("token") or "").strip())
+
+
+def subject_from_request() -> str | None:
+    """HTTP 엔드포인트용 — Authorization 헤더를 먼저 보고 `?token=` 으로 물러난다.
+
+    WebSocket 은 헤더를 못 붙여 쿼리로 받지만, 보통의 GET 은 헤더를 쓸 수 있고
+    그쪽이 로그에 토큰이 남지 않아 낫다.
+    """
+    header = (request.headers.get("Authorization") or "").strip()
+    if header.lower().startswith("bearer "):
+        return _subject(header[7:].strip())
+    return subject_from_query()
+
+
+def _subject(token: str) -> str | None:
     if current_app.config.get("AUTH_DISABLED"):
         return (request.args.get("userId") or "anonymous").strip() or "anonymous"
 
-    token = (request.args.get("token") or "").strip()
     secret = current_app.config.get("JWT_SECRET")
     if not token or not secret:
         return None
