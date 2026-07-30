@@ -1,0 +1,145 @@
+# 로그를 읽을 권한.
+#
+# ServiceAccount 는 플랫폼 네임스페이스(`oncloud-ai`)에 있고, 로그는 사용자 리소스가
+# 도는 런타임 네임스페이스에서 읽는다. 그래서 Role 은 네임스페이스마다 두고
+# RoleBinding 의 subject 로 플랫폼의 SA 를 가리킨다.
+#
+# **ClusterRole 을 쓰지 않는다.** 네임스페이스를 요청 파라미터로 받는 서비스라
+# 클러스터 전체 권한을 주면 설정 실수 하나로 kube-system 로그까지 열린다.
+# 여기 적힌 네임스페이스만 읽을 수 있고, 서버도 같은 목록으로 한 번 더 거절한다
+# (20-configmap.yaml 의 ALLOWED_NAMESPACES).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: log-stream-service
+  namespace: oncloud-ai
+  labels:
+    app.kubernetes.io/name: log-stream-service
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai-devops-workspace
+  labels:
+    app.kubernetes.io/name: log-stream-service
+rules:
+  # Pod 목록/상세는 이름이 맞는지 확인하는 데, log 는 내용을 읽는 데 쓴다.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai-devops-workspace
+  labels:
+    app.kubernetes.io/name: log-stream-service
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: log-stream-reader
+subjects:
+  - kind: ServiceAccount
+    name: log-stream-service
+    namespace: oncloud-ai
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai-devops-service
+  labels:
+    app.kubernetes.io/name: log-stream-service
+rules:
+  # Pod 목록/상세는 이름이 맞는지 확인하는 데, log 는 내용을 읽는 데 쓴다.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai-devops-service
+  labels:
+    app.kubernetes.io/name: log-stream-service
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: log-stream-reader
+subjects:
+  - kind: ServiceAccount
+    name: log-stream-service
+    namespace: oncloud-ai
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai-model-workspace
+  labels:
+    app.kubernetes.io/name: log-stream-service
+rules:
+  # Pod 목록/상세는 이름이 맞는지 확인하는 데, log 는 내용을 읽는 데 쓴다.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai-model-workspace
+  labels:
+    app.kubernetes.io/name: log-stream-service
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: log-stream-reader
+subjects:
+  - kind: ServiceAccount
+    name: log-stream-service
+    namespace: oncloud-ai
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai-model-serving
+  labels:
+    app.kubernetes.io/name: log-stream-service
+rules:
+  # Pod 목록/상세는 이름이 맞는지 확인하는 데, log 는 내용을 읽는 데 쓴다.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai-model-serving
+  labels:
+    app.kubernetes.io/name: log-stream-service
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: log-stream-reader
+subjects:
+  - kind: ServiceAccount
+    name: log-stream-service
+    namespace: oncloud-ai

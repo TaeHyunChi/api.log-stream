@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: log-stream-service-config
+  namespace: oncloud-ai
+  labels:
+    app.kubernetes.io/name: log-stream-service
+data:
+  SERVICE_NAME: log-stream-service
+  API_PREFIX: /api/v1
+  PORT: "8246"
+  LOG_LEVEL: INFO
+  JSON_LOGS: "true"
+  JWT_ALGORITHM: HS256
+  AUTH_DISABLED: "false"
+  # 로그 스트림은 응답이 끝나지 않는다. 워커당 스레드 수가 곧 동시 접속 수이고,
+  # 연결 하나가 k8s 를 읽는 스레드를 하나 더 쓴다.
+  GUNICORN_WORKERS: "1"
+  GUNICORN_THREADS: "64"
+  # 유휴 연결이 프록시에 끊기지 않도록 주기적으로 ping 을 보낸다.
+  WS_PING_SECONDS: "25"
+  # 로그를 읽어도 되는 네임스페이스. 네임스페이스를 요청 파라미터로 받으므로
+  # 이 목록이 없으면 로그인한 사람이 kube-system 로그까지 가져갈 수 있다.
+  # RBAC 도 이 네임스페이스들에만 준다(30-rbac.yaml) — 두 겹으로 막는다.
+  ALLOWED_NAMESPACES: >-
+    oncloud-ai-devops-workspace,oncloud-ai-devops-service,oncloud-ai-model-workspace,oncloud-ai-model-serving
+  # 처음 접속했을 때 거슬러 올라가 보낼 줄 수. `since` 를 주면 그쪽이 우선한다.
+  DEFAULT_TAIL_LINES: "200"
+  MAX_TAIL_LINES: "5000"

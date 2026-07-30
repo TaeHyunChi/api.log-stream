@@ -1,0 +1,137 @@
+# Kong 게이트웨이에 이 서비스를 등록하는 Job.
+#
+# 이 클러스터의 Kong은 Ingress Controller 없이 DB(Postgres) 모드로 단독 구동 중이라
+# Ingress 리소스로는 라우팅이 잡히지 않는다. 그래서 Admin API에 Service/Route를
+# 직접 upsert 한다. PUT을 쓰기 때문에 몇 번을 다시 돌려도 결과가 같다(멱등).
+#
+# 실제 호출 경로:
+#   사용자 → http://oncloud-ai.co.kr/api/v1/logs
+#          → kong-proxy → log-stream-service.oncloud-ai.svc.cluster.local:8246
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: log-stream-service-kong-register
+  namespace: oncloud-ai
+  labels:
+    app.kubernetes.io/name: log-stream-service
+    app.kubernetes.io/component: kong-register
+data:
+  register.py: |
+    """Kong Admin API에 이 서비스의 Service/Route를 등록한다."""
+    import json
+    import os
+    import urllib.error
+    import urllib.request
+
+    ADMIN = os.environ["KONG_ADMIN_URL"].rstrip("/")
+    SERVICE = os.environ["KONG_SERVICE_NAME"]
+    ROUTE = os.environ["KONG_ROUTE_NAME"]
+    UPSTREAM = os.environ["KONG_UPSTREAM_URL"]
+    HOSTS = [h.strip() for h in os.environ["KONG_ROUTE_HOSTS"].split(",") if h.strip()]
+    PATHS = [p.strip() for p in os.environ["KONG_ROUTE_PATHS"].split(",") if p.strip()]
+
+
+    def call(method, path, payload=None):
+        data = json.dumps(payload).encode() if payload is not None else None
+        req = urllib.request.Request(f"{ADMIN}{path}", data=data, method=method)
+        if data:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as res:
+                return json.loads(res.read() or b"{}")
+        except urllib.error.HTTPError as exc:
+            raise SystemExit(f"[kong] {method} {path} 실패: {exc.code} {exc.read().decode()}") from None
+        except urllib.error.URLError as exc:
+            raise SystemExit(f"[kong] {ADMIN} 에 연결할 수 없습니다: {exc.reason}") from None
+
+
+    # PUT = 이름 기준 upsert. 이미 있으면 덮어쓰고 없으면 만든다.
+    svc = call("PUT", f"/services/{SERVICE}", {
+        "url": UPSTREAM,
+        "retries": 3,
+        "connect_timeout": 5000,
+        "read_timeout": 60000,
+        "write_timeout": 60000,
+    })
+    print(f"[kong] service '{svc['name']}' -> {UPSTREAM}")
+
+    route = call("PUT", f"/routes/{ROUTE}", {
+        "service": {"name": SERVICE},
+        "protocols": ["http", "https"],
+        "hosts": HOSTS,
+        "paths": PATHS,
+        # 업스트림이 /api/v1/logs 를 그대로 받으므로 경로를 자르면 안 된다.
+        "strip_path": False,
+        # 업스트림에 원래 Host(oncloud-ai.co.kr)를 그대로 전달한다.
+        "preserve_host": True,
+    })
+    print(f"[kong] route '{route['name']}' hosts={route['hosts']} paths={route['paths']} "
+          f"strip_path={route['strip_path']}")
+    print("[kong] 등록 완료")
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: log-stream-service-kong-register
+  namespace: oncloud-ai
+  labels:
+    app.kubernetes.io/name: log-stream-service
+    app.kubernetes.io/component: kong-register
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: log-stream-service
+        app.kubernetes.io/component: kong-register
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: register
+          # 서비스 이미지를 그대로 재사용한다(python이 들어 있어 별도 이미지가 필요 없다).
+          image: oncloud-ai.co.kr:5000/oncloud-ai/domain-service:0.1.2
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/scripts/register.py"]
+          env:
+            - name: KONG_ADMIN_URL
+              value: http://kong-admin.kong.svc.cluster.local:8001
+            - name: KONG_SERVICE_NAME
+              value: log-stream-service
+            - name: KONG_ROUTE_NAME
+              value: log-stream-service-v1
+            - name: KONG_UPSTREAM_URL
+              value: http://log-stream-service.oncloud-ai.svc.cluster.local:8246
+            # 실제 사용자 요청이 들어오는 호스트
+            - name: KONG_ROUTE_HOSTS
+              value: oncloud-ai.co.kr
+            - name: KONG_ROUTE_PATHS
+              value: /api/v1/logs
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: log-stream-service-kong-register
