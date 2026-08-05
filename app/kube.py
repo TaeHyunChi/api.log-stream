@@ -43,6 +43,46 @@ def _request(path: str) -> urllib.request.Request:
     return request
 
 
+def _containers(body: dict) -> list[dict]:
+    """Pod 의 컨테이너 목록 — 여러 개면 화면이 고르게 한다.
+
+    init 컨테이너도 포함한다(로그가 남고, 실패 원인이 거기 있을 때가 많다).
+    `ready`/`state` 는 상태 배지용이고, 순서는 spec 순서 그대로다.
+    """
+    spec = body.get("spec") or {}
+    status = body.get("status") or {}
+    state_of = {}
+    for key in ("containerStatuses", "initContainerStatuses"):
+        for cs in status.get(key) or []:
+            if not isinstance(cs, dict):
+                continue
+            state = cs.get("state") or {}
+            # 값이 아니라 **키 존재**로 판정한다 — running 이 빈 객체로 올 수 있어
+            # 참/거짓으로 보면 실행 중인 컨테이너를 waiting 으로 오판한다.
+            phase = "running" if "running" in state else (
+                "terminated" if "terminated" in state else "waiting"
+            )
+            state_of[cs.get("name")] = {
+                "ready": bool(cs.get("ready")),
+                "state": phase,
+                "restarts": int(cs.get("restartCount") or 0),
+            }
+
+    containers = []
+    for key, is_init in (("initContainers", True), ("containers", False)):
+        for c in spec.get(key) or []:
+            if not isinstance(c, dict) or not c.get("name"):
+                continue
+            meta = state_of.get(c["name"], {"ready": False, "state": "waiting", "restarts": 0})
+            containers.append({
+                "name": c["name"],
+                "image": c.get("image") or "",
+                "init": is_init,
+                **meta,
+            })
+    return containers
+
+
 def pod_status(namespace: str, pod: str) -> dict | None:
     """Pod 한 개의 현재 상태. 없으면(삭제됐으면) None.
 
@@ -91,6 +131,7 @@ def pod_status(namespace: str, pod: str) -> dict | None:
         "ready": ready,
         "startedAt": status.get("startTime") or "",
         "reason": reason,
+        "containers": _containers(body),
     }
 
 

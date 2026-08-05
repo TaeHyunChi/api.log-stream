@@ -81,6 +81,7 @@ def get_pod_status():
             "startedAt": "",
             "message": "Pod 를 찾을 수 없습니다. 이미 종료된 배포의 Pod 는 클러스터에 남아 있지 않습니다.",
             "available": False,
+            "containers": [],
         }
 
     return {
@@ -92,6 +93,7 @@ def get_pod_status():
         "startedAt": status["startedAt"],
         "message": status["reason"],
         "available": True,
+        "containers": status.get("containers") or [],
     }
 
 
