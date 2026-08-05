@@ -30,3 +30,26 @@ def index():
         "service": current_app.config["SERVICE_NAME"],
         "allowedNamespaces": list(current_app.config["ALLOWED_NAMESPACES"]),
     }
+
+
+@bp.get("/api/v1/system/info")
+def system_info():
+    """표준 시스템 정보 — 플랫폼 컨트롤 패널 fanout 대상 (MSA-TEMPLATE 4절).
+
+    `dependsOn` 은 설정에 담긴 클러스터 내부 서비스 URL 에서 자동 추출한다 —
+    목록을 손으로 들고 있지 않아 설정이 바뀌면 연관 그래프도 따라온다.
+    """
+    import re
+
+    from flask import current_app
+
+    self_name = current_app.config.get("SERVICE_NAME", "")
+    dependencies = set()
+    for value in current_app.config.values():
+        if not isinstance(value, str):
+            continue
+        for match in re.finditer(r"([a-z0-9-]+)\.[a-z0-9-]+\.svc(?:\.cluster\.local)?", value):
+            name = match.group(1)
+            if name and name != self_name:
+                dependencies.add(name)
+    return {"service": self_name, "status": "ok", "dependsOn": sorted(dependencies)}
