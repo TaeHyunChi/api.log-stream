@@ -44,12 +44,18 @@ def system_info():
     from flask import current_app
 
     self_name = current_app.config.get("SERVICE_NAME", "")
+    # 인프라(k8s API/DB/브로커 등)는 MSA API 가 아니라 제외한다 — 그래프의 목적은
+    # "어떤 API 를 끄면 어떤 API 가 영향을 받는가" 이다.
+    infra = {
+        "kubernetes", "postgres", "mariadb", "redis", "chroma", "rabbitmq",
+        "langfuse-web", "langfuse", "kong-admin", "kong-proxy", "minio", "gitea-service",
+    }
     dependencies = set()
     for value in current_app.config.values():
         if not isinstance(value, str):
             continue
         for match in re.finditer(r"([a-z0-9-]+)\.[a-z0-9-]+\.svc(?:\.cluster\.local)?", value):
             name = match.group(1)
-            if name and name != self_name:
+            if name and name != self_name and name not in infra:
                 dependencies.add(name)
     return {"service": self_name, "status": "ok", "dependsOn": sorted(dependencies)}
