@@ -31,9 +31,10 @@ spec:
     spec:
       affinity:
         nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
                   - key: node-role.kubernetes.io/control-plane
                     operator: DoesNotExist
       # k8s 로그를 읽으려면 이 SA 의 토큰이 필요하다(30-rbac.yaml).
