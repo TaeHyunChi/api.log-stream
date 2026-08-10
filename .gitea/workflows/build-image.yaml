@@ -1,0 +1,52 @@
+# MSA 이미지 빌드 — main 에 push 되면 x86_64 이미지를 만들어 내부 레지스트리에 올린다.
+#
+# 이전 전에는 맥에서 `docker build` + `skopeo copy` 를 손으로 돌렸다. 대상 클러스터가
+# x86_64 라 맥(arm64)에서 빌드하면 에뮬레이션이 걸려 현실적이지 않아, 빌드를 클러스터
+# 안으로 옮겼다. 24코어라 오히려 더 빠르다.
+#
+# Docker(dind) 대신 Kaniko 를 쓴다 — privileged 가 필요 없고, k3s 는 containerd 라
+# 노드 Docker 로 빌드해도 클러스터가 그 이미지를 보지 못한다.
+#
+# push 목적지가 매니페스트의 이미지 주소(oncloud-ai.co.kr:5000)와 다른 이유:
+# 파드 안에서 그 도메인은 공인 IP 로 해석된다. push 는 클러스터 내부 DNS 로 직접 하고,
+# pull 은 노드 registries.yaml 의 미러가 같은 저장소 경로로 돌려준다.
+name: build-image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 소스 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 이미지 태그 확인
+        id: meta
+        run: |
+          # 배포 매니페스트가 정본이다. 태그를 워크플로에 중복 정의하지 않는다 —
+          # 두 곳에 두면 반드시 어긋난다.
+          IMAGE=$(grep -h -m1 'image: oncloud-ai.co.kr:5000/platform/' deploy/k3s/40-deployment.yaml | sed 's|.*/platform/||' | tr -d ' ')
+          if [ -z "$IMAGE" ]; then
+            echo "deploy/k3s/40-deployment.yaml 에서 이미지 태그를 찾지 못했습니다." >&2
+            exit 1
+          fi
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "빌드 대상: $IMAGE"
+
+      - name: Kaniko 빌드 + push
+        run: |
+          set -e
+          IMAGE="${{ steps.meta.outputs.image }}"
+          REG=registry.oncloud-ai-registry.svc.cluster.local:5000
+          docker run --rm \
+            -v "$PWD":/workspace \
+            gcr.io/kaniko-project/executor:v1.23.2 \
+            --context=dir:///workspace \
+            --dockerfile=/workspace/Dockerfile \
+            --destination="$REG/platform/$IMAGE" \
+            --insecure --skip-tls-verify \
+            --cache=true --cache-repo="$REG/build-cache" --cache-copy-layers=true
