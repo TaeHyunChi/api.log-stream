@@ -1,15 +1,16 @@
 # MSA 이미지 빌드 — main 에 push 되면 x86_64 이미지를 만들어 내부 레지스트리에 올린다.
 #
-# 이전 전에는 맥에서 `docker build` + `skopeo copy` 를 손으로 돌렸다. 대상 클러스터가
-# x86_64 라 맥(arm64)에서 빌드하면 에뮬레이션이 걸려 현실적이지 않아, 빌드를 클러스터
-# 안으로 옮겼다. 24코어라 오히려 더 빠르다.
+# 이전 전에는 맥에서 `docker build` + `skopeo copy` 를 손으로 돌렸다. 운영 클러스터가
+# x86_64 라 맥(arm64)에서 빌드하면 에뮬레이션이 걸려 현실적이지 않다. 빌드를 클러스터
+# 안으로 옮겼다 — 24코어라 오히려 빠르다.
 #
-# Docker(dind) 대신 Kaniko 를 쓴다 — privileged 가 필요 없고, k3s 는 containerd 라
-# 노드 Docker 로 빌드해도 클러스터가 그 이미지를 보지 못한다.
+# Kaniko 를 `docker run -v "$PWD":/workspace` 로 돌리는 방법은 **동작하지 않는다**.
+# 잡이 컨테이너 안에서 실행되므로 그 경로는 dind 데몬의 파일시스템에 없고,
+# Kaniko 가 빈 디렉터리를 컨텍스트로 받아 "dockerfile path" 오류로 죽는다(실제로 겪었다).
+# dind 의 `docker build` 는 컨텍스트를 API 로 전송하므로 이 문제가 없다.
 #
-# push 목적지가 매니페스트의 이미지 주소(oncloud-ai.co.kr:5000)와 다른 이유:
-# 파드 안에서 그 도메인은 공인 IP 로 해석된다. push 는 클러스터 내부 DNS 로 직접 하고,
-# pull 은 노드 registries.yaml 의 미러가 같은 저장소 경로로 돌려준다.
+# 레지스트리는 평문 HTTP 다. 러너의 dind 사이드카가
+# `--insecure-registry=oncloud-ai.co.kr:5000` 로 떠 있어 이 주소로만 push 가 된다.
 name: build-image
 
 on:
@@ -29,24 +30,16 @@ jobs:
         run: |
           # 배포 매니페스트가 정본이다. 태그를 워크플로에 중복 정의하지 않는다 —
           # 두 곳에 두면 반드시 어긋난다.
-          IMAGE=$(grep -h -m1 'image: oncloud-ai.co.kr:5000/platform/' deploy/k3s/40-deployment.yaml | sed 's|.*/platform/||' | tr -d ' ')
+          IMAGE=$(grep -h -m1 'image: oncloud-ai.co.kr:5000/platform/' deploy/k3s/40-deployment.yaml | sed 's|.*image: ||' | tr -d ' ')
           if [ -z "$IMAGE" ]; then
-            echo "deploy/k3s/40-deployment.yaml 에서 이미지 태그를 찾지 못했습니다." >&2
+            echo "deploy/k3s/40-deployment.yaml 에서 이미지 주소를 찾지 못했습니다." >&2
             exit 1
           fi
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           echo "빌드 대상: $IMAGE"
 
-      - name: Kaniko 빌드 + push
+      - name: 빌드 + push
         run: |
           set -e
-          IMAGE="${{ steps.meta.outputs.image }}"
-          REG=registry.oncloud-ai-registry.svc.cluster.local:5000
-          docker run --rm \
-            -v "$PWD":/workspace \
-            gcr.io/kaniko-project/executor:v1.23.2 \
-            --context=dir:///workspace \
-            --dockerfile=/workspace/Dockerfile \
-            --destination="$REG/platform/$IMAGE" \
-            --insecure --skip-tls-verify \
-            --cache=true --cache-repo="$REG/build-cache" --cache-copy-layers=true
+          docker build -f Dockerfile -t "${{ steps.meta.outputs.image }}" .
+          docker push "${{ steps.meta.outputs.image }}"
