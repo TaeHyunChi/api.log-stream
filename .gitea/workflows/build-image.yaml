@@ -41,5 +41,14 @@ jobs:
       - name: 빌드 + push
         run: |
           set -e
-          docker build -f Dockerfile -t "${{ steps.meta.outputs.image }}" .
-          docker push "${{ steps.meta.outputs.image }}"
+          IMAGE="${{ steps.meta.outputs.image }}"
+          # 매니페스트의 이미지 이름(oncloud-ai.co.kr:5000/...)으로 빌드하되, push 는
+          # **노드 주소**로 한다. 잡 컨테이너 안에서 그 도메인은 공인 IP 로 해석되어
+          # 레지스트리에 닿지 못한다(빌드는 되고 push 에서 타임아웃 — 실제로 겪었다).
+          # 러너 파드의 hostAliases 는 dind 가 띄우는 잡 컨테이너에 상속되지 않는다.
+          # 레지스트리에 남는 repository 경로가 같아서 pull 은 미러로 그대로 동작한다.
+          PUSH_ADDR="192.168.201.50:30500"
+          PUSH_IMAGE="$PUSH_ADDR/${IMAGE#*/}"
+          docker build -f Dockerfile -t "$IMAGE" -t "$PUSH_IMAGE" .
+          docker push "$PUSH_IMAGE"
+          echo "push 완료: $PUSH_IMAGE (매니페스트 참조명: $IMAGE)"
