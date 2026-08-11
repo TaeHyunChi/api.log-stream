@@ -108,7 +108,7 @@ spec:
           command: ["python", "/scripts/register.py"]
           env:
             - name: KONG_ADMIN_URL
-              value: http://kong-admin.kong.svc.cluster.local:8001
+              value: http://kong-admin.oncloud-ai-kong.svc.cluster.local:8001
             - name: KONG_SERVICE_NAME
               value: log-stream-service
             - name: KONG_ROUTE_NAME
