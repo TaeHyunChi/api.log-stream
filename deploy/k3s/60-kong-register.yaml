@@ -6,13 +6,13 @@
 #
 # 실제 호출 경로:
 #   사용자 → http://oncloud-ai.co.kr/api/v1/logs
-#          → kong-proxy → log-stream-service.oncloud-ai.svc.cluster.local:8246
+#          → kong-proxy → log-stream-service.oncloud-ai-platform.svc.cluster.local:8246
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: log-stream-service-kong-register
-  namespace: oncloud-ai
+  namespace: oncloud-ai-platform
   labels:
     app.kubernetes.io/name: log-stream-service
     app.kubernetes.io/component: kong-register
@@ -74,7 +74,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: log-stream-service-kong-register
-  namespace: oncloud-ai
+  namespace: oncloud-ai-platform
   labels:
     app.kubernetes.io/name: log-stream-service
     app.kubernetes.io/component: kong-register
@@ -114,7 +114,7 @@ spec:
             - name: KONG_ROUTE_NAME
               value: log-stream-service-v1
             - name: KONG_UPSTREAM_URL
-              value: http://log-stream-service.oncloud-ai.svc.cluster.local:8246
+              value: http://log-stream-service.oncloud-ai-platform.svc.cluster.local:8246
             # 실제 사용자 요청이 들어오는 호스트
             - name: KONG_ROUTE_HOSTS
               value: oncloud-ai.co.kr

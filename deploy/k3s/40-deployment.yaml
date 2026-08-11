@@ -6,7 +6,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: log-stream-service
-  namespace: oncloud-ai
+  namespace: oncloud-ai-platform
   labels:
     app.kubernetes.io/name: log-stream-service
     app.kubernetes.io/component: api

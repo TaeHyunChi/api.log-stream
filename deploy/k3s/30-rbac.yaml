@@ -12,7 +12,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: log-stream-service
-  namespace: oncloud-ai
+  namespace: oncloud-ai-platform
   labels:
     app.kubernetes.io/name: log-stream-service
 ---
@@ -46,7 +46,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: log-stream-service
-    namespace: oncloud-ai
+    namespace: oncloud-ai-platform
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -78,7 +78,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: log-stream-service
-    namespace: oncloud-ai
+    namespace: oncloud-ai-platform
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -110,7 +110,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: log-stream-service
-    namespace: oncloud-ai
+    namespace: oncloud-ai-platform
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -142,7 +142,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: log-stream-service
-    namespace: oncloud-ai
+    namespace: oncloud-ai-platform
 ---
 # 플랫폼 네임스페이스 — 클러스터 관리(리소스 브라우저)가 플랫폼 서비스 Pod 의
 # 로그를 본다. kube-system 은 여전히 뺀다(허용 목록의 이유 그대로).
@@ -150,7 +150,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: log-stream-reader
-  namespace: oncloud-ai
+  namespace: oncloud-ai-platform
   labels:
     app.kubernetes.io/name: log-stream-service
 rules:
@@ -165,7 +165,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: log-stream-reader
-  namespace: oncloud-ai
+  namespace: oncloud-ai-platform
   labels:
     app.kubernetes.io/name: log-stream-service
 roleRef:
@@ -175,7 +175,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: log-stream-service
-    namespace: oncloud-ai
+    namespace: oncloud-ai-platform
 ---
 # 에이전트 서비스 인스턴스 네임스페이스 — 인스턴스 Pod 는 런타임 + web sidecar
 # (+ 하네스 clone init)로 **컨테이너가 여럿**이라 어느 것을 볼지 고를 수 있어야 한다.
@@ -208,4 +208,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: log-stream-service
-    namespace: oncloud-ai
+    namespace: oncloud-ai-platform
