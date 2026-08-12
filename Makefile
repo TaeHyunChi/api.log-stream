@@ -1,7 +1,7 @@
 IMAGE    ?= log-stream-service
 TAG      ?= 0.1.2
-NS       ?= oncloud-ai
-REGISTRY ?= oncloud-ai.co.kr:5000/oncloud-ai
+NS       ?= oncloud-ai-platform
+REGISTRY ?= oncloud-ai.co.kr:5000/platform
 NODE     ?= k3s-master
 WORKER   ?= k3s-worker
 # k3s 노드 아키텍처가 빌드 머신과 다르면 지정한다. 예: make build PLATFORM=linux/amd64
