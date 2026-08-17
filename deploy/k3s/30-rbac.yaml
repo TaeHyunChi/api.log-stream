@@ -241,3 +241,35 @@ subjects:
   - kind: ServiceAccount
     name: log-stream-service
     namespace: oncloud-ai-platform
+---
+# 스크립트 샌드박스 Pod 의 로그 — script MFE 의 실시간 로그 팝업이 쓴다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai-sandbox
+  labels:
+    app.kubernetes.io/name: log-stream-service
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: log-stream-reader
+  namespace: oncloud-ai-sandbox
+  labels:
+    app.kubernetes.io/name: log-stream-service
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: log-stream-reader
+subjects:
+  - kind: ServiceAccount
+    name: log-stream-service
+    namespace: oncloud-ai-platform

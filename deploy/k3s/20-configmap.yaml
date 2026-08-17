@@ -23,7 +23,7 @@ data:
   # 이 목록이 없으면 로그인한 사람이 kube-system 로그까지 가져갈 수 있다.
   # RBAC 도 이 네임스페이스들에만 준다(30-rbac.yaml) — 두 겹으로 막는다.
   ALLOWED_NAMESPACES: >-
-    oncloud-ai-platform,oncloud-ai-devops-workspace,oncloud-ai-devops-service,oncloud-ai-model-workspace,oncloud-ai-model-serving,oncloud-ai-agent-runtime
+    oncloud-ai-platform,oncloud-ai-sandbox,oncloud-ai-devops-workspace,oncloud-ai-devops-service,oncloud-ai-model-workspace,oncloud-ai-model-serving,oncloud-ai-agent-runtime
   # 처음 접속했을 때 거슬러 올라가 보낼 줄 수. `since` 를 주면 그쪽이 우선한다.
   DEFAULT_TAIL_LINES: "200"
   MAX_TAIL_LINES: "5000"
