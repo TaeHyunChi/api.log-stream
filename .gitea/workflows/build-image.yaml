@@ -38,6 +38,32 @@ jobs:
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           echo "빌드 대상: $IMAGE"
 
+      - name: 배포 태그 일치 검사
+        run: |
+          set -e
+          # 한 서비스의 매니페스트는 **자기 이미지를 같은 태그로만** 가리켜야 한다.
+          # 버전을 올릴 때 40-deployment.yaml 만 고치기 쉬운데, 마이그레이션/Kong 등록
+          # Job 은 그대로 남아도 Complete 로 끝나 뒤처진 사실이 드러나지 않는다 —
+          # 스키마·라우트가 조용히 옛 코드로 남는다(실제로 리비전 하나를 건너뛰었다).
+          IMAGE="${{ steps.meta.outputs.image }}"
+          REPO="${IMAGE%:*}"
+          TAG="${IMAGE##*:}"
+          MISMATCH=""
+          while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            found="${line##*:}"
+            [ "$found" = "$TAG" ] || MISMATCH="${MISMATCH}${line}
+          "
+          done <<EOF
+          $(grep -rnF "image: ${REPO}:" deploy/k3s 2>/dev/null || true)
+          EOF
+          if [ -n "$MISMATCH" ]; then
+            echo "배포 태그($TAG)와 다른 참조가 있습니다 — 함께 올려 주세요:" >&2
+            printf '%s' "$MISMATCH" >&2
+            exit 1
+          fi
+          echo "태그 일치 확인: $REPO:$TAG"
+
       - name: 빌드 + push
         env:
           HARBOR_USER: ${{ secrets.HARBOR_USER }}
