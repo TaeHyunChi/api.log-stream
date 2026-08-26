@@ -117,7 +117,7 @@ spec:
               value: http://log-stream-service.oncloud-ai-platform.svc.cluster.local:8246
             # 실제 사용자 요청이 들어오는 호스트
             - name: KONG_ROUTE_HOSTS
-              value: oncloud-ai.co.kr
+              value: api.oncloud-ai.co.kr
             - name: KONG_ROUTE_PATHS
               value: /api/v1/logs
           resources:
