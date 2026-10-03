@@ -1,0 +1,341 @@
+openapi: 3.0.3
+info:
+  title: Log Stream Service API
+  version: 1.0.0
+  description: |
+    Pod 로그 실시간 중계 API.
+
+    모니터링할 Pod(네임스페이스 + 이름)와 마지막으로 받은 로그 시각을 받아, 그 Pod 에서 새로 생기는
+    로그를 **WebSocket** 으로 흘려보낸다. 로그 스트림은 응답이 끝나지 않는 연결이라 일반 REST 서비스에서
+    떼어 냈다(워커 스레드를 동시 접속 수에 맞춰 따로 조절). DB 를 쓰지 않는다 — 로그의 원본은 k8s 다.
+
+        브라우저 ── WS  /api/v1/logs/stream?namespace=&pod=&since=&token=
+                         │
+                     k8s  GET /api/v1/namespaces/{ns}/pods/{pod}/log?follow=true
+
+    접근 범위: 설정 `ALLOWED_NAMESPACES` 에 든 네임스페이스만 읽을 수 있다(그 밖은 어떤 네임스페이스가
+    있는지 알려 주지 않고 거절). 게이트웨이: `api.oncloud-ai.co.kr` `/api/v1/logs`.
+
+    OpenAPI 3 는 WebSocket 을 온전히 표현하지 못한다 — `/logs/stream` 은 HTTP Upgrade 요청으로 적고
+    프레임 형식은 설명과 `LogStreamFrame` 스키마로 정리했다.
+    (`/healthz`·`/readyz`·`/` 는 API prefix 밖이라 명세에 넣지 않는다.)
+servers:
+  - url: http://localhost:8246/api/v1
+    description: 로컬 개발 서버
+tags:
+  - name: logs
+    description: Pod 로그 조회·실시간 중계
+  - name: system
+    description: 표준 시스템 정보
+paths:
+  /logs/namespaces:
+    get:
+      tags: [logs]
+      operationId: listLogNamespaces
+      summary: 로그를 읽을 수 있는 네임스페이스 목록
+      description: 화면이 고를 수 있도록 설정 `ALLOWED_NAMESPACES` 를 그대로 돌려준다. 인증을 검사하지 않는다.
+      responses:
+        '200':
+          description: 네임스페이스 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: string
+                    example: [oncloud-ai-devops-service, oncloud-ai-devops-workspace]
+      security: []
+  /logs/pod-status:
+    get:
+      tags: [logs]
+      operationId: getLogPodStatus
+      summary: 스트림 열기 전 Pod 상태 확인
+      description: |
+        "접속해도 되는가" 판단(`available`)을 여기서 내린다. 로그는 Pod 오브젝트가 남아 있는 한
+        (Succeeded/Failed 포함) 읽을 수 있으므로 `exists` 가 곧 `available` 이다. Pod 가 없으면 404 가 아니라
+        `exists=false` 인 200 을 돌려준다. 인증은 `Authorization: Bearer` 헤더를 먼저 보고 없으면 `?token=` 쿼리로 물러난다.
+      parameters:
+        - $ref: '#/components/parameters/Namespace'
+        - $ref: '#/components/parameters/Pod'
+        - name: podId
+          in: query
+          required: false
+          description: pod 의 별칭(pod 가 없을 때만 쓴다)
+          schema:
+            type: string
+        - $ref: '#/components/parameters/QueryToken'
+      responses:
+        '200':
+          description: Pod 상태
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PodStatus'
+        '400':
+          description: code BAD_REQUEST — namespace·pod 누락
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: code UNAUTHORIZED — 토큰 없음/무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: code FORBIDDEN — 허용 목록 밖 네임스페이스
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: code K8S_UNAVAILABLE — 클러스터 밖이거나 k8s API 호출 실패·권한 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
+        - queryToken: []
+  /logs/stream:
+    get:
+      tags: [logs]
+      operationId: streamPodLogs
+      summary: Pod 로그 실시간 스트림(WebSocket)
+      description: |
+        **WebSocket 엔드포인트** — `ws(s)://<host>/api/v1/logs/stream?...` 로 접속한다
+        (`Connection: Upgrade`, `Upgrade: websocket`). 보내기만 하는 채널이며 클라이언트가 보낸 프레임은 무시한다.
+        브라우저 WebSocket 은 헤더를 붙일 수 없어 JWT 를 `?token=` 쿼리로 받는다(접근 로그에 쿼리를 남기지 않는다).
+
+        서버 → 클라이언트 텍스트 프레임은 한 프레임에 JSON 하나(`LogStreamFrame`):
+
+            {"type":"ready","namespace":"...","pod":"...","container":"..."}   연결 수립(첫 프레임)
+            {"type":"log","time":"2026-07-30T10:42:28.06Z","text":"GET / ..."} 로그 한 줄
+            {"type":"ping"}                                                     유휴 연결 유지(WS_PING_SECONDS, 기본 30초)
+            {"type":"end","reason":"stream-closed"}                             Pod 로그 끝(이후 종료)
+            {"type":"error","message":"..."}                                    오류(이후 종료)
+
+        `since` 는 **마지막으로 받은 로그의 시각**(log 프레임의 `time` 그대로)이다. 다시 붙을 때 주면 그 뒤의 줄부터 온다.
+        `since` 가 없으면 마지막 `tail` 줄부터 따라간다. 읽는 쪽이 밀리면 큐(1000줄)에서 오래된 줄부터 버린다.
+
+        닫기 코드: 1008 `unauthorized`(토큰 무효 — 프레임 없이 닫음), 1008 `bad-request`(파라미터 오류·허용 목록 밖
+        네임스페이스 — error 프레임 뒤), 1011 `no-cluster`(클러스터 밖 — error 프레임 뒤).
+      parameters:
+        - $ref: '#/components/parameters/Namespace'
+        - $ref: '#/components/parameters/Pod'
+        - name: podId
+          in: query
+          required: false
+          description: pod 의 별칭(pod 가 없을 때만 쓴다)
+          schema:
+            type: string
+        - name: container
+          in: query
+          required: false
+          description: 컨테이너 이름(여러 컨테이너 Pod 에서 지정; 생략하면 k8s 기본)
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          description: 마지막으로 받은 로그 시각(RFC 3339) — 있으면 tail 대신 이 시점부터 이어 받는다
+          schema:
+            type: string
+            format: date-time
+        - name: sinceTime
+          in: query
+          required: false
+          description: since 의 별칭
+          schema:
+            type: string
+            format: date-time
+        - name: tail
+          in: query
+          required: false
+          description: 처음 붙을 때 가져올 마지막 줄 수(기본 DEFAULT_TAIL_LINES=200, 상한 MAX_TAIL_LINES=5000 으로 자름)
+          schema:
+            type: integer
+            minimum: 0
+        - name: token
+          in: query
+          required: true
+          description: 플랫폼 JWT(브라우저 WebSocket 은 헤더를 못 붙인다)
+          schema:
+            type: string
+        - name: Upgrade
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: [websocket]
+        - name: Connection
+          in: header
+          required: true
+          schema:
+            type: string
+            example: Upgrade
+      responses:
+        '101':
+          description: |
+            Switching Protocols — WebSocket 수립. 이후 서버가 `LogStreamFrame` JSON 텍스트 프레임을 보낸다.
+            인증·파라미터 오류도 업그레이드 뒤 닫기 코드로 알린다(HTTP 4xx 를 내지 않는다).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogStreamFrame'
+      security:
+        - queryToken: []
+  /system/info:
+    get:
+      tags: [system]
+      operationId: getSystemInfo
+      x-internal: true
+      summary: 표준 시스템 정보 — 내부용
+      description: 내부용 — 플랫폼 컨트롤 패널 fanout 대상. `dependsOn` 은 설정의 클러스터 내부 서비스 URL 에서 자동 추출한다.
+      responses:
+        '200':
+          description: 시스템 정보
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemInfo'
+      security: []
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    queryToken:
+      type: apiKey
+      in: query
+      name: token
+      description: 플랫폼 JWT 를 쿼리로 — WebSocket 용(HTTP 엔드포인트는 Authorization 헤더 권장)
+  parameters:
+    Namespace:
+      name: namespace
+      in: query
+      required: true
+      description: Pod 네임스페이스 — ALLOWED_NAMESPACES 안이어야 한다
+      schema:
+        type: string
+    Pod:
+      name: pod
+      in: query
+      required: true
+      description: Pod 이름(별칭 podId)
+      schema:
+        type: string
+    QueryToken:
+      name: token
+      in: query
+      required: false
+      description: Authorization 헤더 대신 쓰는 JWT
+      schema:
+        type: string
+  schemas:
+    PodStatus:
+      type: object
+      required: [name, namespace, exists, phase, ready, startedAt, message, available, containers]
+      properties:
+        name:
+          type: string
+        namespace:
+          type: string
+        exists:
+          type: boolean
+        phase:
+          type: string
+          description: Pending / Running / Succeeded / Failed / Unknown (없으면 빈 문자열)
+        ready:
+          type: boolean
+        startedAt:
+          type: string
+          description: Pod startTime(RFC 3339, 없으면 빈 문자열)
+        message:
+          type: string
+          description: 컨테이너 대기/종료 사유(예 CrashLoopBackOff) 또는 Pod 없음 안내
+        available:
+          type: boolean
+          description: 스트림을 열어도 되는지(= exists)
+        containers:
+          type: array
+          items:
+            $ref: '#/components/schemas/PodContainer'
+    PodContainer:
+      type: object
+      required: [name, image, init, ready, state, restarts]
+      properties:
+        name:
+          type: string
+        image:
+          type: string
+        init:
+          type: boolean
+          description: init 컨테이너인지
+        ready:
+          type: boolean
+        state:
+          type: string
+          enum: [running, terminated, waiting]
+        restarts:
+          type: integer
+    LogStreamFrame:
+      type: object
+      description: WebSocket 서버 → 클라이언트 프레임(JSON 텍스트 한 개)
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [ready, log, ping, end, error]
+        namespace:
+          type: string
+          description: ready
+        pod:
+          type: string
+          description: ready
+        container:
+          type: string
+          description: ready
+        time:
+          type: string
+          description: log — k8s 타임스탬프(다음 접속의 since 로 쓴다, 없으면 빈 문자열)
+        text:
+          type: string
+          description: log — 로그 본문 한 줄
+        reason:
+          type: string
+          description: end — stream-closed
+        message:
+          type: string
+          description: error — 사유
+    SystemInfo:
+      type: object
+      required: [service, status, dependsOn]
+      properties:
+        service:
+          type: string
+          example: log-stream-service
+        status:
+          type: string
+          example: ok
+        dependsOn:
+          type: array
+          items:
+            type: string
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: FORBIDDEN
+        message:
+          type: string
