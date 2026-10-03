@@ -194,3 +194,27 @@ def test_terminated_pod_still_offers_logs(client, monkeypatch):
     body = _status(client, "namespace=oncloud-ai-devops-service&pod=done").get_json()
     assert body["available"] is True
     assert body["message"] == "Error"
+
+
+def test_allowed_namespaces_require_login():
+    """허용 네임스페이스 목록도 로그인한 사용자에게만 — 토큰 없거나 무효면 401."""
+    import time
+
+    import jwt
+
+    from app import create_app
+    from app.config import TestConfig
+
+    class _AuthConfig(TestConfig):
+        AUTH_DISABLED = False
+        JWT_SECRET = "test-secret"
+
+    client = create_app(_AuthConfig()).test_client()
+    assert client.get("/api/v1/logs/namespaces").status_code == 401
+    bad = {"Authorization": "Bearer not-a-jwt"}
+    assert client.get("/api/v1/logs/namespaces", headers=bad).status_code == 401
+
+    token = jwt.encode({"sub": "u-1", "exp": int(time.time()) + 60}, "test-secret", algorithm="HS256")
+    res = client.get("/api/v1/logs/namespaces", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 200
+    assert "oncloud-ai-devops-service" in res.get_json()["items"]

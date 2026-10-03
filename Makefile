@@ -1,5 +1,5 @@
 IMAGE    ?= log-stream-service
-TAG      ?= 0.1.2
+TAG      ?= 0.1.5
 NS       ?= oncloud-ai-platform
 REGISTRY ?= oncloud-ai.co.kr:5000/platform
 NODE     ?= k3s-master

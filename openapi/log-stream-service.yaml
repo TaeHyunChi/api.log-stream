@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Log Stream Service API
-  version: 1.0.0
+  version: 1.0.1
   description: |
     Pod 로그 실시간 중계 API.
 
@@ -33,7 +33,11 @@ paths:
       tags: [logs]
       operationId: listLogNamespaces
       summary: 로그를 읽을 수 있는 네임스페이스 목록
-      description: 화면이 고를 수 있도록 설정 `ALLOWED_NAMESPACES` 를 그대로 돌려준다. 인증을 검사하지 않는다.
+      description: |
+        화면이 고를 수 있도록 설정 `ALLOWED_NAMESPACES` 를 그대로 돌려준다. 로그인이 필요하다 —
+        인증은 `Authorization: Bearer` 헤더를 먼저 보고 없으면 `?token=` 쿼리로 물러난다.
+      parameters:
+        - $ref: '#/components/parameters/QueryToken'
       responses:
         '200':
           description: 네임스페이스 목록
@@ -48,7 +52,15 @@ paths:
                     items:
                       type: string
                     example: [oncloud-ai-devops-service, oncloud-ai-devops-workspace]
-      security: []
+        '401':
+          description: code UNAUTHORIZED — 토큰 없음/무효
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
+        - queryToken: []
   /logs/pod-status:
     get:
       tags: [logs]

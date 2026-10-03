@@ -38,7 +38,12 @@ _QUEUE_SIZE = 1000
 
 @bp.get("/namespaces")
 def allowed_namespaces():
-    """로그를 읽을 수 있는 네임스페이스 목록 — 화면이 고를 수 있게."""
+    """로그를 읽을 수 있는 네임스페이스 목록 — 화면이 고를 수 있게.
+
+    허용 목록도 클러스터 구성 정보라 로그인한 사용자에게만 보여 준다.
+    """
+    if not subject_from_request():
+        return {"code": "UNAUTHORIZED", "message": "인증이 필요합니다."}, 401
     return {"items": list(current_app.config["ALLOWED_NAMESPACES"])}
 
 
