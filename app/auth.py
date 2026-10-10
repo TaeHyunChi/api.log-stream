@@ -31,6 +31,59 @@ def subject_from_request() -> str | None:
     return subject_from_query()
 
 
+def claims_from_request() -> dict | None:
+    """검증된 JWT 클레임 — 헤더 먼저, 없으면 `?token=`. 실패하면 None(AUTH_DISABLED 면 빈 dict)."""
+    header = (request.headers.get("Authorization") or "").strip()
+    if header.lower().startswith("bearer "):
+        token = header[7:].strip()
+    else:
+        token = (request.args.get("token") or "").strip()
+    return _claims(token)
+
+
+def _claims(token: str) -> dict | None:
+    if current_app.config.get("AUTH_DISABLED"):
+        return {"sub": (request.args.get("userId") or "anonymous").strip() or "anonymous"}
+    secret = current_app.config.get("JWT_SECRET")
+    if not token or not secret:
+        return None
+    try:
+        claims = jwt.decode(
+            token,
+            secret,
+            algorithms=[current_app.config.get("JWT_ALGORITHM", "HS256")],
+            options={"require": ["exp"], "verify_aud": False},
+        )
+    except jwt.InvalidTokenError as exc:
+        log.info("토큰 거절: %s", exc)
+        return None
+    return claims if isinstance(claims.get("sub"), str) and claims.get("sub") else None
+
+
+def can_reach_other_clusters(claims: dict | None) -> bool:
+    """다른 클러스터(클러스터 관리에 추가된 것)의 Pod 를 볼 자격 — 관리자 또는 클러스터 관리 권한.
+
+    다른 클러스터는 이 서비스의 네임스페이스 허용 목록이 아니라 **그 클러스터의 관리자 kubeconfig** 로
+    붙는다. 그래서 로그인만으로는 열지 않고, 그 클러스터를 다룰 수 있는 사람에게만 연다.
+    """
+    if current_app.config.get("AUTH_DISABLED"):
+        return True
+    if not claims:
+        return False
+    roles: list[str] = []
+    for name in ("roleIds", "roles", "role_ids"):
+        value = claims.get(name)
+        if isinstance(value, str):
+            roles.append(value)
+        elif isinstance(value, list):
+            roles.extend(r for r in value if isinstance(r, str))
+    if current_app.config["ADMIN_ROLE_ID"] in roles:
+        return True
+    perms = claims.get("permissions")
+    wanted = current_app.config["REMOTE_CLUSTER_PERMISSIONS"]
+    return isinstance(perms, list) and any(p in perms for p in wanted)
+
+
 def _subject(token: str) -> str | None:
     if current_app.config.get("AUTH_DISABLED"):
         return (request.args.get("userId") or "anonymous").strip() or "anonymous"

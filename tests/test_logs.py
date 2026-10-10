@@ -158,7 +158,7 @@ def test_pod_status_outside_cluster_is_502(client):
 def test_missing_pod_is_not_available(client, monkeypatch):
     """사라진 Pod 는 exists/available 이 false — 화면은 상태 정보만 그린다."""
     monkeypatch.setattr(logs, "in_cluster", lambda: True)
-    monkeypatch.setattr(logs, "pod_status", lambda ns, pod: None)
+    monkeypatch.setattr(logs, "pod_status", lambda ns, pod, **_kw: None)
     body = _status(client, "namespace=oncloud-ai-devops-service&pod=gone").get_json()
     assert body["exists"] is False
     assert body["available"] is False
@@ -170,7 +170,7 @@ def test_running_pod_is_available(client, monkeypatch):
     monkeypatch.setattr(
         logs,
         "pod_status",
-        lambda ns, pod: {
+        lambda ns, pod, **_kw: {
             "phase": "Running", "ready": True,
             "startedAt": "2026-07-30T01:00:00Z", "reason": "",
         },
@@ -186,7 +186,7 @@ def test_terminated_pod_still_offers_logs(client, monkeypatch):
     monkeypatch.setattr(
         logs,
         "pod_status",
-        lambda ns, pod: {
+        lambda ns, pod, **_kw: {
             "phase": "Failed", "ready": False,
             "startedAt": "2026-07-30T01:00:00Z", "reason": "Error",
         },

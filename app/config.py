@@ -33,6 +33,20 @@ class Config:
         "oncloud-ai-model-workspace,oncloud-ai-model-serving",
     )
 
+    # --- 다른 클러스터(클러스터 관리에 추가된 것) — app/cluster_access.py ---
+    #: kubeconfig 원문을 받는 곳(서비스 토큰 전용 /clusters/{id}/credentials). 비우면 이 클러스터만.
+    K8S_CLUSTER_SERVICE_URL = os.getenv(
+        "K8S_CLUSTER_SERVICE_URL", "http://k8s-cluster-service.oncloud-ai-platform.svc.cluster.local:8209/api/v1"
+    ).rstrip("/")
+    #: 이 플랫폼 클러스터로 볼 클러스터 id·API 서버 주소(노드 주소로 등록된 경우) — ServiceAccount 로 붙는다.
+    LOCAL_CLUSTER_IDS = tuple(_csv("LOCAL_CLUSTER_IDS", ""))
+    LOCAL_API_SERVER_URLS = tuple(_csv("LOCAL_API_SERVER_URLS", ""))
+    ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "seed-admin")
+    #: 다른 클러스터의 Pod 를 볼 수 있는 권한 키(관리자는 늘 가능).
+    REMOTE_CLUSTER_PERMISSIONS = tuple(
+        _csv("REMOTE_CLUSTER_PERMISSIONS", "k8s-cluster.resource.manage,k8s-cluster.cluster.manage")
+    )
+
     #: 처음 접속했을 때 거슬러 올라가 보낼 줄 수. `since` 를 주면 그쪽이 우선한다.
     DEFAULT_TAIL_LINES = int(os.getenv("DEFAULT_TAIL_LINES", "200"))
     MAX_TAIL_LINES = int(os.getenv("MAX_TAIL_LINES", "5000"))
@@ -45,5 +59,6 @@ class Config:
 
 class TestConfig(Config):
     AUTH_DISABLED = True
+    K8S_CLUSTER_SERVICE_URL = ""
     JSON_LOGS = False
     ALLOWED_NAMESPACES = ["oncloud-ai-devops-service", "oncloud-ai-devops-workspace"]

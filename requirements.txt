@@ -4,3 +4,4 @@ gunicorn==23.0.0
 python-dotenv==1.0.1
 # 브라우저와의 실시간 채널.
 flask-sock==0.7.0
+PyYAML==6.0.2

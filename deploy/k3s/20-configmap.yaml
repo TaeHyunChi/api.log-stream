@@ -24,6 +24,11 @@ data:
   # RBAC 도 이 네임스페이스들에만 준다(30-rbac.yaml) — 두 겹으로 막는다.
   ALLOWED_NAMESPACES: >-
     oncloud-ai-platform,oncloud-ai-sandbox,oncloud-ai-devops-workspace,oncloud-ai-devops-service,oncloud-ai-model-workspace,oncloud-ai-model-serving,oncloud-ai-agent-runtime,oncloud-ai-agent-ecosystem,oncloud-ai-build,oncloud-ai-chroma,oncloud-ai-database,oncloud-ai-gitea,oncloud-ai-harbor,oncloud-ai-kong,oncloud-ai-rabbitmq,oncloud-ai-workflow-ecosystem
+  # 다른 클러스터(클러스터 관리에 추가된 것) — kubeconfig 를 k8s-cluster-service 의 서비스 전용 경로로 받아 붙는다.
+  # 이 플랫폼 클러스터가 노드 주소로 등록돼 있으면 ServiceAccount 로 붙는다(허용 목록 그대로).
+  K8S_CLUSTER_SERVICE_URL: http://k8s-cluster-service.oncloud-ai-platform.svc.cluster.local:8209/api/v1
+  LOCAL_API_SERVER_URLS: https://192.168.201.50:6443
+  REMOTE_CLUSTER_PERMISSIONS: k8s-cluster.resource.manage,k8s-cluster.cluster.manage
   # 처음 접속했을 때 거슬러 올라가 보낼 줄 수. `since` 를 주면 그쪽이 우선한다.
   DEFAULT_TAIL_LINES: "200"
   MAX_TAIL_LINES: "5000"

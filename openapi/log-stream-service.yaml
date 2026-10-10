@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Log Stream Service API
-  version: 1.0.1
+  version: 1.1.0
   description: |
     Pod 로그 실시간 중계 API.
 
@@ -73,6 +73,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Namespace'
         - $ref: '#/components/parameters/Pod'
+        - $ref: '#/components/parameters/ClusterId'
         - name: podId
           in: query
           required: false
@@ -140,6 +141,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/Namespace'
         - $ref: '#/components/parameters/Pod'
+        - $ref: '#/components/parameters/ClusterId'
         - name: podId
           in: query
           required: false
@@ -243,6 +245,16 @@ components:
       in: query
       required: true
       description: Pod 이름(별칭 podId)
+      schema:
+        type: string
+    ClusterId:
+      name: clusterId
+      in: query
+      required: false
+      description: |
+        클러스터 관리의 클러스터 id. 없거나 이 플랫폼 클러스터면 예전 그대로(ALLOWED_NAMESPACES · ServiceAccount).
+        다른 클러스터면 관리자 또는 k8s-cluster.resource.manage·k8s-cluster.cluster.manage 권한만, 그 클러스터의
+        kubeconfig(k8s-cluster-service 서비스 전용 /credentials)로 읽고 네임스페이스 허용 목록은 적용하지 않는다.
       schema:
         type: string
     QueryToken:

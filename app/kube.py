@@ -19,11 +19,9 @@ from collections.abc import Iterator
 
 from flask import current_app
 
-log = logging.getLogger(__name__)
+from .cluster_access import CA_PATH, TOKEN_PATH, Access, local_access  # noqa: F401 - 테스트가 경로를 바꾼다
 
-_SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
-TOKEN_PATH = f"{_SA_DIR}/token"
-CA_PATH = f"{_SA_DIR}/ca.crt"
+log = logging.getLogger(__name__)
 
 
 class KubeError(Exception):
@@ -34,13 +32,13 @@ def in_cluster() -> bool:
     return os.path.exists(TOKEN_PATH)
 
 
-def _request(path: str) -> urllib.request.Request:
-    api = current_app.config["K8S_API"].rstrip("/")
-    request = urllib.request.Request(f"{api}{path}", method="GET")  # noqa: S310
-    # 토큰은 회전한다 — 열 때마다 다시 읽는다.
-    with open(TOKEN_PATH, encoding="utf-8") as handle:
-        request.add_header("Authorization", f"Bearer {handle.read().strip()}")
-    return request
+def _request(path: str, access: Access | None = None) -> urllib.request.Request:
+    """GET 요청 — `access` 가 없으면 이 클러스터(ServiceAccount). 토큰은 열 때마다 다시 읽는다."""
+    return (access or local_access()).request(path)
+
+
+def _context(access: Access | None) -> ssl.SSLContext:
+    return (access or local_access()).ssl_context()
 
 
 def _containers(body: dict) -> list[dict]:
@@ -83,7 +81,7 @@ def _containers(body: dict) -> list[dict]:
     return containers
 
 
-def pod_status(namespace: str, pod: str) -> dict | None:
+def pod_status(namespace: str, pod: str, access: Access | None = None) -> dict | None:
     """Pod 한 개의 현재 상태. 없으면(삭제됐으면) None.
 
     로그/터미널을 열기 전의 **상태 확인**에 쓴다 — 이미 사라진 Pod 에 스트림을
@@ -94,11 +92,11 @@ def pod_status(namespace: str, pod: str) -> dict | None:
         f"/api/v1/namespaces/{urllib.parse.quote(namespace)}"
         f"/pods/{urllib.parse.quote(pod)}"
     )
-    context = ssl.create_default_context(cafile=CA_PATH)
+    context = _context(access)
     timeout = current_app.config["K8S_CONNECT_TIMEOUT"]
     try:
         with urllib.request.urlopen(  # noqa: S310
-            _request(path), timeout=timeout, context=context
+            _request(path, access), timeout=timeout, context=context
         ) as response:
             body = json.loads(response.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
@@ -155,7 +153,8 @@ def log_url(namespace: str, pod: str, *, container: str = "", since: str = "", t
 
 
 def stream_lines(
-    namespace: str, pod: str, *, container: str = "", since: str = "", tail: int = 0
+    namespace: str, pod: str, *, container: str = "", since: str = "", tail: int = 0,
+    access: Access | None = None,
 ) -> Iterator[str]:
     """로그를 한 줄씩 내보낸다. 연결이 끊기거나 Pod 가 사라지면 끝난다.
 
@@ -163,11 +162,11 @@ def stream_lines(
     함께 닫힌다 — k8s 쪽 연결이 남지 않는다.
     """
     url_path = log_url(namespace, pod, container=container, since=since, tail=tail)
-    context = ssl.create_default_context(cafile=CA_PATH)
+    context = _context(access)
     timeout = current_app.config["K8S_CONNECT_TIMEOUT"]
     try:
         response = urllib.request.urlopen(  # noqa: S310
-            _request(url_path), timeout=timeout, context=context
+            _request(url_path, access), timeout=timeout, context=context
         )
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:300]
