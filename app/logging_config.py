@@ -6,7 +6,7 @@ import sys
 
 from flask import g, has_request_context
 
-from .otel import current_trace_ids
+from .otel import access_log_ids, current_trace_ids
 
 
 class RequestIdFilter(logging.Filter):
@@ -27,6 +27,9 @@ class JsonFormatter(logging.Formatter):
         ids = current_trace_ids()
         if ids:
             payload["trace_id"], payload["span_id"] = ids
+        else:
+            # gunicorn 접근 로그는 요청이 끝난 뒤 찍혀 스팬 밖이다 — 응답 헤더에서 꺼낸다.
+            payload.update(access_log_ids(record, payload["request_id"]))
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False)
