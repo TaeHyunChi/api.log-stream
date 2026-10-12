@@ -22,6 +22,7 @@ from .config import Config
 from .errors import register_error_handlers
 from .health import bp as health_bp
 from .logging_config import configure_logging
+from .otel import init_tracing
 
 
 def create_app(config: Config | None = None) -> Flask:
@@ -32,6 +33,7 @@ def create_app(config: Config | None = None) -> Flask:
     app.json.ensure_ascii = False
 
     configure_logging(app.config["LOG_LEVEL"], app.config["JSON_LOGS"])
+    init_tracing(app)
 
     register_error_handlers(app)
     app.register_blueprint(health_bp)

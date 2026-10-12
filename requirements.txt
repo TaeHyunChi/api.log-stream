@@ -5,3 +5,8 @@ python-dotenv==1.0.1
 # 브라우저와의 실시간 채널.
 flask-sock==0.7.0
 PyYAML==6.0.2
+# 분산 트레이스(OTLP → Alloy → Tempo) — app/otel.py
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp-proto-http==1.45.1
+opentelemetry-instrumentation-flask==0.66b1
+opentelemetry-instrumentation-urllib==0.66b1

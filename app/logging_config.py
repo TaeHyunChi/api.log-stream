@@ -6,6 +6,8 @@ import sys
 
 from flask import g, has_request_context
 
+from .otel import current_trace_ids
+
 
 class RequestIdFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
@@ -22,6 +24,9 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "request_id": getattr(record, "request_id", "-"),
         }
+        ids = current_trace_ids()
+        if ids:
+            payload["trace_id"], payload["span_id"] = ids
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False)

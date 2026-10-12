@@ -32,3 +32,7 @@ data:
   # 처음 접속했을 때 거슬러 올라가 보낼 줄 수. `since` 를 주면 그쪽이 우선한다.
   DEFAULT_TAIL_LINES: "200"
   MAX_TAIL_LINES: "5000"
+  # --- 분산 트레이스 (LGTM: OTLP → Alloy → Tempo, app/otel.py) — 비우면 계측하지 않는다 ---
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy.oncloud-ai-monitoring.svc.cluster.local:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_RESOURCE_ATTRIBUTES: deployment.environment=production
