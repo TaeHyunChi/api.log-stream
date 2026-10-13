@@ -104,3 +104,24 @@ def _subject(token: str) -> str | None:
 
     subject = claims.get("sub")
     return subject if isinstance(subject, str) and subject else None
+
+def is_admin(claims: dict | None) -> bool:
+    """플랫폼 관리자(Role ADMIN_ROLE_ID) — 관리자 전용 네임스페이스(ADMIN_NAMESPACES)의 Pod 를 열 자격."""
+    if current_app.config.get("AUTH_DISABLED"):
+        return True
+    if not claims:
+        return False
+    roles: list[str] = []
+    for name in ("roleIds", "roles", "role_ids"):
+        value = claims.get(name)
+        if isinstance(value, str):
+            roles.append(value)
+        elif isinstance(value, list):
+            roles.extend(r for r in value if isinstance(r, str))
+    return current_app.config["ADMIN_ROLE_ID"] in roles
+
+
+def is_admin_namespace(namespace: str) -> bool:
+    """허용 목록 밖이지만 관리자는 열 수 있는 네임스페이스 — 설정 ADMIN_NAMESPACES(`*` = 나머지 전부)."""
+    admin = current_app.config.get("ADMIN_NAMESPACES") or []
+    return "*" in admin or namespace in admin

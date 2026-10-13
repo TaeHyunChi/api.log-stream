@@ -593,3 +593,39 @@ subjects:
   - kind: ServiceAccount
     name: log-stream-service
     namespace: oncloud-ai-platform
+---
+# 관리자 전용 네임스페이스(설정 ADMIN_NAMESPACES — 기본 `*` = 허용 목록 밖 전부, kube-system 포함)용 클러스터 권한.
+# 서비스가 요청자의 Role(ADMIN_ROLE_ID)을 확인한 뒤에만 쓴다 — 일반 사용자는 "관리자 전용 POD 입니다."(ADMIN_ONLY).
+# 위 네임스페이스별 Role 은 일반 사용자 허용 목록용으로 그대로 둔다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: log-stream-admin-reader
+  labels:
+    app.kubernetes.io/name: log-stream-service
+    oncloud-ai/created-by: chidae2000
+    oncloud-ai/created-by-api: log-stream-service
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: log-stream-admin-reader
+  labels:
+    app.kubernetes.io/name: log-stream-service
+    oncloud-ai/created-by: chidae2000
+    oncloud-ai/created-by-api: log-stream-service
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: log-stream-admin-reader
+subjects:
+  - kind: ServiceAccount
+    name: log-stream-service
+    namespace: oncloud-ai-platform

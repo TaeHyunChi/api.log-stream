@@ -38,6 +38,7 @@ def test_namespace_and_pod_are_required(app):
 
 def test_namespace_outside_the_allowlist_is_refused(app):
     """RBAC 으로도 막히지만 서버가 먼저 거절해 이유를 분명히 알려 준다."""
+    app.config["ADMIN_NAMESPACES"] = []  # 관리자 전용 네임스페이스를 끈 경우(인증을 끈 테스트는 모두 관리자다)
     value, error = _params(app, "namespace=kube-system&pod=etcd-0")
     assert value is None
     # 어떤 네임스페이스가 있는지는 알려 주지 않는다.
@@ -145,9 +146,48 @@ def test_pod_status_requires_namespace_and_pod(client):
 
 
 def test_pod_status_refuses_namespaces_outside_the_allowlist(client):
+    # 관리자 전용 네임스페이스를 끄면(ADMIN_NAMESPACES 비움) 허용 목록 밖은 누구에게나 닫힌다.
+    client.application.config["ADMIN_NAMESPACES"] = []
     res = _status(client, "namespace=kube-system&pod=etcd-0")
     assert res.status_code == 403
+    assert res.get_json()["code"] == "FORBIDDEN"
     assert "kube-system" not in res.get_json()["message"]
+
+
+def _auth_client(role_ids):
+    import datetime as dt
+
+    import jwt
+
+    from app import create_app
+    from app.config import TestConfig
+
+    class _AuthConfig(TestConfig):
+        AUTH_DISABLED = False
+        JWT_SECRET = "test-secret"
+
+    client = create_app(_AuthConfig()).test_client()
+    token = jwt.encode(
+        {"sub": "u1", "roleIds": role_ids, "exp": dt.datetime.now(dt.UTC) + dt.timedelta(minutes=5)},
+        "test-secret",
+        algorithm="HS256",
+    )
+    return client, {"Authorization": f"Bearer {token}"}
+
+
+def test_admin_only_namespace_tells_users_it_is_for_admins():
+    # 허용 목록 밖(kube-system)은 관리자 전용 — 일반 사용자에게는 "관리자 전용 POD 입니다."
+    client, headers = _auth_client(["seed-developer"])
+    res = client.get("/api/v1/logs/pod-status?namespace=kube-system&pod=metrics-server-0", headers=headers)
+    assert res.status_code == 403
+    assert res.get_json() == {"code": "ADMIN_ONLY", "message": "관리자 전용 POD 입니다."}
+
+
+def test_admin_passes_admin_only_namespace():
+    # 관리자는 통과한다 — 여기서는 클러스터 밖이라 502(접근 판정은 넘어섰다).
+    client, headers = _auth_client(["seed-admin"])
+    res = client.get("/api/v1/logs/pod-status?namespace=kube-system&pod=metrics-server-0", headers=headers)
+    assert res.status_code == 502
 
 
 def test_pod_status_outside_cluster_is_502(client):

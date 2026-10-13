@@ -42,6 +42,10 @@ class Config:
     LOCAL_CLUSTER_IDS = tuple(_csv("LOCAL_CLUSTER_IDS", ""))
     LOCAL_API_SERVER_URLS = tuple(_csv("LOCAL_API_SERVER_URLS", ""))
     ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "seed-admin")
+    # 관리자 전용 네임스페이스 — 허용 목록 밖이라도 관리자(ADMIN_ROLE_ID)는 연다. 일반 사용자는
+    # "관리자 전용 POD 입니다."(ADMIN_ONLY). `*` 는 허용 목록 밖 전부(kube-system 포함), 비우면 끈다.
+    # RBAC 도 클러스터 단위로 줘야 한다(30-rbac.yaml 의 ClusterRole).
+    ADMIN_NAMESPACES = _csv("ADMIN_NAMESPACES", "*")
     #: 다른 클러스터의 Pod 를 볼 수 있는 권한 키(관리자는 늘 가능).
     REMOTE_CLUSTER_PERMISSIONS = tuple(
         _csv("REMOTE_CLUSTER_PERMISSIONS", "k8s-cluster.resource.manage,k8s-cluster.cluster.manage")

@@ -90,6 +90,7 @@ def test_remote_pod_status_skips_platform_allowlist(client, monkeypatch):
 
 def test_local_cluster_keeps_allowlist(client, monkeypatch):
     monkeypatch.setattr(logs, "in_cluster", lambda: True)
+    client.application.config["ADMIN_NAMESPACES"] = []  # 인증을 끈 테스트는 관리자라 관리자 전용 목록을 끈다
     res = client.get("/api/v1/logs/pod-status?namespace=kube-system&pod=x")
     assert res.status_code == 403
 

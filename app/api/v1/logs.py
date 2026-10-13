@@ -25,7 +25,14 @@ import threading
 from flask import Blueprint, current_app, request
 
 from ... import cluster_access
-from ...auth import can_reach_other_clusters, claims_from_request, subject_from_query, subject_from_request
+from ...auth import (
+    can_reach_other_clusters,
+    claims_from_request,
+    is_admin,
+    is_admin_namespace,
+    subject_from_query,
+    subject_from_request,
+)
 from ...kube import KubeError, in_cluster, pod_status, split_timestamp, stream_lines
 
 log = logging.getLogger(__name__)
@@ -63,8 +70,11 @@ def _access_for(
     else:
         access = None
     if namespace not in current_app.config["ALLOWED_NAMESPACES"]:
-        # 어떤 네임스페이스가 있는지는 알려 주지 않는다.
-        return None, ("FORBIDDEN", "이 네임스페이스는 조회할 수 없습니다.", 403)
+        if not is_admin_namespace(namespace):
+            # 어떤 네임스페이스가 있는지는 알려 주지 않는다.
+            return None, ("FORBIDDEN", "이 네임스페이스는 조회할 수 없습니다.", 403)
+        if not is_admin(claims_from_request()):
+            return None, ("ADMIN_ONLY", "관리자 전용 POD 입니다.", 403)
     if require_cluster and not in_cluster():
         return None, ("K8S_UNAVAILABLE", "클러스터 밖에서는 조회할 수 없습니다.", 502)
     return access or cluster_access.local_access(), None
