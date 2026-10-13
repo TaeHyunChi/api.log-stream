@@ -40,6 +40,11 @@ class Config:
     ).rstrip("/")
     #: 이 플랫폼 클러스터로 볼 클러스터 id·API 서버 주소(노드 주소로 등록된 경우) — ServiceAccount 로 붙는다.
     LOCAL_CLUSTER_IDS = tuple(_csv("LOCAL_CLUSTER_IDS", ""))
+    #: 네임스페이스 권한 설정(로그 조회, 클러스터별) — volume-service `GET /volumes/namespaces?grant=log`.
+    #: 기동 뒤 처음 쓸 때 한 번 읽는다(app/granted.py). 비우면 설정 ALLOWED_NAMESPACES 만.
+    VOLUME_SERVICE_URL = os.getenv(
+        "VOLUME_SERVICE_URL", "http://volume-service.oncloud-ai-platform.svc.cluster.local:8215/api/v1"
+    ).rstrip("/")
     LOCAL_API_SERVER_URLS = tuple(_csv("LOCAL_API_SERVER_URLS", ""))
     ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "seed-admin")
     # 관리자 전용 네임스페이스 — 허용 목록 밖이라도 관리자(ADMIN_ROLE_ID)는 연다. 일반 사용자는
@@ -64,5 +69,6 @@ class Config:
 class TestConfig(Config):
     AUTH_DISABLED = True
     K8S_CLUSTER_SERVICE_URL = ""
+    VOLUME_SERVICE_URL = ""
     JSON_LOGS = False
     ALLOWED_NAMESPACES = ["oncloud-ai-devops-service", "oncloud-ai-devops-workspace"]

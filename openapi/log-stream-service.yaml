@@ -34,10 +34,13 @@ paths:
       operationId: listLogNamespaces
       summary: 로그를 읽을 수 있는 네임스페이스 목록
       description: |
-        화면이 고를 수 있도록 설정 `ALLOWED_NAMESPACES` 를 그대로 돌려준다. 로그인이 필요하다 —
-        인증은 `Authorization: Bearer` 헤더를 먼저 보고 없으면 `?token=` 쿼리로 물러난다.
+        화면이 고를 수 있도록 설정 `ALLOWED_NAMESPACES` 에 네임스페이스 권한 설정(로그 조회, volume-service
+        `?grant=log`)을 더해 돌려준다. `clusterId` 가 다른 클러스터면 그 클러스터의 권한 설정만. 권한 설정은
+        기동 뒤 처음 쓸 때 한 번 읽는다 — 관리자 화면의 '권한 적용'이 이 서비스를 재시작해 다시 읽힌다.
+        로그인이 필요하다 — 인증은 `Authorization: Bearer` 헤더를 먼저 보고 없으면 `?token=` 쿼리로 물러난다.
       parameters:
         - $ref: '#/components/parameters/QueryToken'
+        - $ref: '#/components/parameters/ClusterId'
       responses:
         '200':
           description: 네임스페이스 목록

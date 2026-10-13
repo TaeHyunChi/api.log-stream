@@ -32,6 +32,9 @@ data:
   K8S_CLUSTER_SERVICE_URL: http://k8s-cluster-service.oncloud-ai-platform.svc.cluster.local:8209/api/v1
   LOCAL_API_SERVER_URLS: https://192.168.201.50:6443
   REMOTE_CLUSTER_PERMISSIONS: k8s-cluster.resource.manage,k8s-cluster.cluster.manage
+  # 네임스페이스 권한 설정(로그 조회, 클러스터별) — 기동 뒤 처음 쓸 때 한 번 읽는다(app/granted.py).
+  # 관리자 화면의 '권한 적용'이 이 Deployment 를 재시작해 다시 읽힌다(volume-service 0.7.0).
+  VOLUME_SERVICE_URL: http://volume-service.oncloud-ai-platform.svc.cluster.local:8215/api/v1
   # 처음 접속했을 때 거슬러 올라가 보낼 줄 수. `since` 를 주면 그쪽이 우선한다.
   DEFAULT_TAIL_LINES: "200"
   MAX_TAIL_LINES: "5000"

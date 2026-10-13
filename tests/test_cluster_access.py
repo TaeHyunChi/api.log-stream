@@ -114,3 +114,69 @@ def test_remote_cluster_requires_admin_or_cluster_permission(app, client, monkey
 
     manager = {"Authorization": f"Bearer {_token(app, roleIds=['r'], permissions=['k8s-cluster.resource.manage'])}"}
     assert client.get(url, headers=manager).status_code == 200
+
+
+# --- 네임스페이스 권한 설정(로그 조회, 클러스터별 — volume-service 0.7.0) -------------------------------
+@pytest.fixture
+def grants(app, monkeypatch):
+    from app import granted
+
+    granted.reset()
+    app.config.update(AUTH_DISABLED=False, JWT_SECRET="s3cret", VOLUME_SERVICE_URL="http://volume/api/v1")
+    table = {"": ["team-a"], "c-remote": ["team-x"]}
+    calls = []
+
+    def fake_fetch(key):
+        calls.append(key)
+        return list(table.get(key, []))
+
+    monkeypatch.setattr(granted, "_fetch", fake_fetch)
+    yield table, calls
+    granted.reset()
+
+
+def test_remote_grant_opens_namespace_for_plain_users(app, client, grants, monkeypatch):
+    monkeypatch.setattr(cluster_access, "_credentials", lambda cid: _creds())
+    monkeypatch.setattr(logs, "pod_status", lambda ns, pod, **_kw: None)
+    plain = {"Authorization": f"Bearer {_token(app, roleIds=['seed-user'])}"}
+    ok = client.get("/api/v1/logs/pod-status?namespace=team-x&pod=p&clusterId=c-remote", headers=plain)
+    assert ok.status_code == 200, ok.get_json()
+    # 다른 클러스터의 권한은 그 클러스터에만 — 같은 이름이라도 플랫폼 클러스터 행(team-a)은 열지 않는다.
+    no = client.get("/api/v1/logs/pod-status?namespace=team-a&pod=p&clusterId=c-remote", headers=plain)
+    assert no.status_code == 403
+    listed = client.get("/api/v1/logs/namespaces?clusterId=c-remote", headers=plain).get_json()["items"]
+    assert listed == ["team-x"]
+
+
+def test_local_grant_adds_to_allowlist(app, client, grants, monkeypatch):
+    monkeypatch.setattr(logs, "in_cluster", lambda: True)
+    monkeypatch.setattr(logs, "pod_status", lambda ns, pod, **_kw: None)
+    plain = {"Authorization": f"Bearer {_token(app, roleIds=['seed-user'])}"}
+    assert client.get("/api/v1/logs/pod-status?namespace=team-a&pod=p", headers=plain).status_code == 200
+    names = client.get("/api/v1/logs/namespaces", headers=plain).get_json()["items"]
+    assert names[-1] == "team-a" and names[0] == app.config["ALLOWED_NAMESPACES"][0]
+
+
+def test_platform_cluster_id_is_resolved_before_refusing_plain_users(app, client, grants, monkeypatch):
+    """화면이 플랫폼 클러스터의 클러스터 관리 id 를 넘겨도 일반 사용자가 허용 목록의 로그를 본다."""
+    app.config["LOCAL_API_SERVER_URLS"] = ("https://10.74.89.47:6443",)
+    monkeypatch.setattr(cluster_access, "_credentials", lambda cid: _creds())
+    monkeypatch.setattr(logs, "in_cluster", lambda: True)
+    monkeypatch.setattr(logs, "pod_status", lambda ns, pod, **_kw: None)
+    plain = {"Authorization": f"Bearer {_token(app, roleIds=['seed-user'])}"}
+    ns = app.config["ALLOWED_NAMESPACES"][0]
+    res = client.get(f"/api/v1/logs/pod-status?namespace={ns}&pod=p&clusterId=c-platform", headers=plain)
+    assert res.status_code == 200, res.get_json()
+    granted_ns = client.get("/api/v1/logs/pod-status?namespace=team-a&pod=p&clusterId=c-platform", headers=plain)
+    assert granted_ns.status_code == 200
+
+
+def test_grants_are_read_once_until_restart(app, client, grants, monkeypatch):
+    table, calls = grants
+    monkeypatch.setattr(logs, "in_cluster", lambda: True)
+    monkeypatch.setattr(logs, "pod_status", lambda ns, pod, **_kw: None)
+    plain = {"Authorization": f"Bearer {_token(app, roleIds=['seed-user'])}"}
+    client.get("/api/v1/logs/pod-status?namespace=team-a&pod=p", headers=plain)
+    table[""] = ["team-b"]  # 저장만 하고 '권한 적용'(재시작) 전 — 반영되지 않는다.
+    assert client.get("/api/v1/logs/pod-status?namespace=team-b&pod=p", headers=plain).status_code == 403
+    assert calls == [""]
