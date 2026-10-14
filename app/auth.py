@@ -121,6 +121,16 @@ def is_admin(claims: dict | None) -> bool:
     return current_app.config["ADMIN_ROLE_ID"] in roles
 
 
+def is_remote_system_namespace(namespace: str) -> bool:
+    """다른 클러스터의 시스템 네임스페이스 — 관리자만(클러스터 관리 권한자도 아님).
+
+    설정 REMOTE_ADMIN_NAMESPACES(기본 default·kube-system·kube-public·kube-node-lease) 또는 `kube-` 로 시작하는 곳.
+    플랫폼 클러스터의 `kube-system` 이 관리자 전용인 것과 맞춘다(2026-10-14).
+    """
+    names = current_app.config.get("REMOTE_ADMIN_NAMESPACES") or []
+    return namespace in names or namespace.startswith("kube-")
+
+
 def is_admin_namespace(namespace: str) -> bool:
     """허용 목록 밖이지만 관리자는 열 수 있는 네임스페이스 — 설정 ADMIN_NAMESPACES(`*` = 나머지 전부)."""
     admin = current_app.config.get("ADMIN_NAMESPACES") or []

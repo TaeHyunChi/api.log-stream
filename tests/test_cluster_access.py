@@ -104,7 +104,7 @@ def test_remote_cluster_requires_admin_or_cluster_permission(app, client, monkey
     app.config.update(AUTH_DISABLED=False, JWT_SECRET="s3cret")
     monkeypatch.setattr(cluster_access, "_credentials", lambda cid: _creds())
     monkeypatch.setattr(logs, "pod_status", lambda ns, pod, **_kw: None)
-    url = "/api/v1/logs/pod-status?namespace=default&pod=p&clusterId=c-remote"
+    url = "/api/v1/logs/pod-status?namespace=team-x&pod=p&clusterId=c-remote"
 
     plain = {"Authorization": f"Bearer {_token(app, roleIds=['seed-user'])}"}
     assert client.get(url, headers=plain).status_code == 403
@@ -180,3 +180,19 @@ def test_grants_are_read_once_until_restart(app, client, grants, monkeypatch):
     table[""] = ["team-b"]  # 저장만 하고 '권한 적용'(재시작) 전 — 반영되지 않는다.
     assert client.get("/api/v1/logs/pod-status?namespace=team-b&pod=p", headers=plain).status_code == 403
     assert calls == [""]
+
+
+def test_remote_system_namespaces_are_admin_only(app, client, monkeypatch):
+    """다른 클러스터의 kube-*·default 는 클러스터 관리 권한자에게도 닫힌다 — 관리자만."""
+    app.config.update(AUTH_DISABLED=False, JWT_SECRET="s3cret")
+    monkeypatch.setattr(cluster_access, "_credentials", lambda cid: _creds())
+    monkeypatch.setattr(logs, "pod_status", lambda ns, pod, **_kw: None)
+    admin = {"Authorization": f"Bearer {_token(app, roleIds=['seed-admin'])}"}
+    manager = {"Authorization": f"Bearer {_token(app, roleIds=['r'], permissions=['k8s-cluster.cluster.manage'])}"}
+    plain = {"Authorization": f"Bearer {_token(app, roleIds=['seed-user'])}"}
+    for ns in ("kube-system", "kube-flannel", "default"):
+        url = f"/api/v1/logs/pod-status?namespace={ns}&pod=p&clusterId=c-remote"
+        assert client.get(url, headers=admin).status_code == 200, ns
+        res = client.get(url, headers=manager)
+        assert res.status_code == 403 and res.get_json()["code"] == "ADMIN_ONLY", ns
+        assert client.get(url, headers=plain).get_json()["code"] == "FORBIDDEN", ns

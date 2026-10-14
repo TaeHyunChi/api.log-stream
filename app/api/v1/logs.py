@@ -30,6 +30,7 @@ from ...auth import (
     claims_from_request,
     is_admin,
     is_admin_namespace,
+    is_remote_system_namespace,
     subject_from_query,
     subject_from_request,
 )
@@ -52,7 +53,8 @@ def _access_for(
     - 이 플랫폼 클러스터(clusterId 없음 · LOCAL_CLUSTER_IDS · 노드 주소로 등록된 클러스터 id):
       설정 허용 목록 + 네임스페이스 권한 설정(로그 조회)이면 누구나, 그 밖은 관리자 전용(ADMIN_ONLY).
     - 다른 클러스터: 관리자·클러스터 관리 권한이면 전부, 아니면 네임스페이스 권한 설정에서 그 클러스터에
-      로그 조회가 켜진 네임스페이스만. 그 클러스터의 kubeconfig 로 붙는다.
+      로그 조회가 켜진 네임스페이스만. 단 시스템 네임스페이스(kube-*·default, REMOTE_ADMIN_NAMESPACES)는
+      관리자만 — 클러스터 관리 권한자는 ADMIN_ONLY. 그 클러스터의 kubeconfig 로 붙는다.
 
     클러스터 id 를 **먼저 풀어** 플랫폼 클러스터인지 본다 — 화면은 클러스터 관리의 id(플랫폼 클러스터도
     고유 id 가 있다)를 넘기므로, 풀기 전에 "다른 클러스터"로 거절하면 일반 사용자가 플랫폼 클러스터의
@@ -73,7 +75,14 @@ def _access_for(
                 )
             return None, ("K8S_UNAVAILABLE", str(exc), 502)
         if not access.local:
-            if can_reach_other_clusters(claims_from_request()) or granted.is_allowed(namespace, cluster_id):
+            claims = claims_from_request()
+            if is_remote_system_namespace(namespace):
+                # 시스템 네임스페이스(kube-*·default)는 클러스터 관리 권한자에게도 닫는다 — 관리자만.
+                if is_admin(claims):
+                    return access, None
+                if can_reach_other_clusters(claims):
+                    return None, ("ADMIN_ONLY", "관리자 전용 POD 입니다.", 403)
+            elif can_reach_other_clusters(claims) or granted.is_allowed(namespace, cluster_id):
                 return access, None
             return None, (
                 "FORBIDDEN",
