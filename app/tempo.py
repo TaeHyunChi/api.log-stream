@@ -44,7 +44,12 @@ ATTR_KEYS = (
     "error.type",
     "exception.type",
     "exception.message",
+    # 요청 · 응답 본문(otel.py 2026-10-21) — 서비스가 가리고 잘라서 싣는다.
+    "http.request.body",
+    "http.response.body",
 )
+BODY_KEYS = ("http.request.body", "http.response.body")
+MAX_BODY_CHARS = 8000
 KIND = {
     "SPAN_KIND_SERVER": "server",
     "SPAN_KIND_CLIENT": "client",
@@ -187,7 +192,8 @@ def _span(span: dict, service: str) -> dict:
         key = attr.get("key")
         if key in ATTR_KEYS:
             value = _attr_value(attr.get("value") or {})
-            attrs[key] = str(value)[:MAX_ATTR_CHARS] if isinstance(value, str) else value
+            limit = MAX_BODY_CHARS if key in BODY_KEYS else MAX_ATTR_CHARS
+            attrs[key] = str(value)[:limit] if isinstance(value, str) else value
     code = str((span.get("status") or {}).get("code") or "")
     status_code = attrs.get("http.status_code") or attrs.get("http.response.status_code")
     error = code in ("STATUS_CODE_ERROR", "2") or (isinstance(status_code, int) and status_code >= 500)

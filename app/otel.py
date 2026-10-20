@@ -9,6 +9,12 @@
 - 로그(JSON)의 `trace_id` · `span_id` 는 logging_config 가 현재 스팬에서 채운다.
 - 응답에 `X-Trace-Id` 를 붙인다 — 요청이 끝난 뒤 찍히는 gunicorn 접근 로그는 스팬 밖이라
   그 헤더(와 `X-Request-ID`)에서 꺼낸다(access_log_ids).
+- 요청 · 응답 본문(2026-10-21): 들어온 요청 스팬에 `http.request.body` · `http.response.body`, 나가는 호출
+  스팬에 `http.request.body` 를 싣는다(트랜잭션 검색의 구간 상세 — 입력 · 출력 데이터). 글 · JSON · 폼만,
+  스트리밍 응답과 파일은 싣지 않는다. 비밀로 보이는 키(password · token · key · cookie …)의 값과 JWT ·
+  이메일 · 전화 · 주민번호 · 카드번호는 가리고 OTEL_BODY_MAX_CHARS(기본 4000)자로 자른다.
+  나가는 호출의 응답 본문은 싣지 않는다 — 훅에서 읽으면 스트림을 소비한다(받는 서비스의 스팬에 남는다).
+  `OTEL_CAPTURE_BODIES=false` 면 본문을 싣지 않는다.
 - gunicorn 은 preload 없이 워커마다 create_app 을 부르므로, 배치 내보내기 스레드는 워커 안에서 생긴다.
 - 표본(RequestRootSampler): 부모 트레이스가 있으면 sampled 플래그와 상관없이 기록하고, 부모가 없으면
   들어온 요청(SERVER 스팬)만 기록한다. Kong 3.4 는 자기가 시작한 트레이스를 sampled=0 으로 넘겨서
@@ -18,15 +24,31 @@
 이 파일은 계측을 넣은 서비스들이 같은 내용으로 나눠 갖는다 — 고칠 때는 함께 고친다.
 """
 
+import json
 import logging
 import os
+import re
 
-from flask import Flask
+from flask import Flask, request
 
 log = logging.getLogger(__name__)
 
 # 헬스 체크·지표는 스팬을 만들지 않는다(초마다 들어와 트레이스를 덮는다).
 EXCLUDED_URLS = "healthz,readyz,metrics"
+
+# 요청 · 응답 본문 — 싣는 형식 · 길이 · 가림 규칙
+BODY_TYPES = ("application/json", "application/x-www-form-urlencoded", "application/xml", "text/")
+BODY_READ_LIMIT = 256 * 1024  # 이보다 큰 본문은 읽지 않는다(스팬에 실을 것은 앞부분뿐)
+_SECRET_KEY = re.compile(
+    r"pass(word|wd)?|secret|token|authorization|api[_-]?key|credential|cookie|private[_-]?key", re.I
+)
+_MASKS = (
+    (re.compile(r"eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}"), "[토큰]"),
+    (re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+"), "[이메일]"),
+    (re.compile(r"\b\d{6}-?[1-4]\d{6}\b"), "[주민번호]"),
+    (re.compile(r"\b(?:\d{4}[- ]?){3}\d{4}\b"), "[카드번호]"),
+    (re.compile(r"\b01[016789]-?\d{3,4}-?\d{4}\b"), "[전화번호]"),
+)
 
 _provider_ready = False
 
@@ -63,7 +85,78 @@ def init_tracing(app: Flask) -> None:
         ids = current_trace_ids()
         if ids:
             response.headers.setdefault("X-Trace-Id", ids[0])
+        if _capture_bodies():
+            try:
+                _record_bodies(trace.get_current_span(), response)
+            except Exception:  # noqa: BLE001 - 계측이 응답을 망가뜨리면 안 된다
+                log.debug("본문을 스팬에 싣지 못했습니다", exc_info=True)
         return response
+
+
+def _capture_bodies() -> bool:
+    return os.getenv("OTEL_CAPTURE_BODIES", "true").strip().lower() != "false"
+
+
+def _body_limit() -> int:
+    try:
+        return max(200, int(os.getenv("OTEL_BODY_MAX_CHARS", "4000")))
+    except ValueError:
+        return 4000
+
+
+def _textual(content_type: str | None) -> bool:
+    value = (content_type or "").lower()
+    return any(t in value for t in BODY_TYPES) and "event-stream" not in value
+
+
+def mask_body(text: str) -> str:
+    """스팬에 실을 본문 — JSON 이면 비밀 키 값을 가리고, 어떤 형식이든 토큰 · 개인정보를 가린 뒤 자른다."""
+    if not text:
+        return ""
+    limit = _body_limit()
+    try:
+        text = json.dumps(_mask_value(json.loads(text)), ensure_ascii=False)
+    except (ValueError, TypeError, RecursionError):
+        pass
+    for pattern, label in _MASKS:
+        text = pattern.sub(label, text)
+    return text if len(text) <= limit else text[:limit] + f"…(+{len(text) - limit}자)"
+
+
+def _mask_value(value, depth: int = 0):
+    if depth > 20:
+        return value
+    if isinstance(value, dict):
+        return {
+            k: (
+                "****"
+                if isinstance(k, str) and _SECRET_KEY.search(k) and v not in (None, "")
+                else _mask_value(v, depth + 1)
+            )
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_mask_value(v, depth + 1) for v in value]
+    return value
+
+
+def _record_bodies(span, response) -> None:
+    if span is None or not span.is_recording():
+        return
+    length = request.content_length
+    if length and length <= BODY_READ_LIMIT and _textual(request.content_type):
+        body = request.get_data(cache=True, as_text=True)
+        if body:
+            span.set_attribute("http.request.body", mask_body(body))
+    if (
+        not response.is_streamed
+        and not response.direct_passthrough
+        and _textual(response.mimetype)
+        and (response.content_length or 0) <= BODY_READ_LIMIT
+    ):
+        body = response.get_data(as_text=True)
+        if body:
+            span.set_attribute("http.response.body", mask_body(body))
 
 
 def _request_root_sampler():
@@ -94,19 +187,51 @@ def _instrument_clients() -> None:
     # "앱 코드가 requests · importlib 를 import 하지 않는다" 같은 가드 테스트를 둔다.
     from opentelemetry.instrumentation.urllib import URLLibInstrumentor
 
-    URLLibInstrumentor().instrument()
+    URLLibInstrumentor().instrument(request_hook=_client_request_hook)
     try:
         from opentelemetry.instrumentation.requests import RequestsInstrumentor
     except ImportError:
         RequestsInstrumentor = None
     if RequestsInstrumentor is not None:
-        RequestsInstrumentor().instrument()
+        RequestsInstrumentor().instrument(request_hook=_requests_request_hook)
     try:
         from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
     except ImportError:
         SQLAlchemyInstrumentor = None
     if SQLAlchemyInstrumentor is not None:
         SQLAlchemyInstrumentor().instrument()
+
+
+def _client_request_hook(span, req) -> None:
+    """urllib 나가는 호출 — 보내는 본문(있으면). 응답 본문은 읽지 않는다(스트림 소비)."""
+    if not _capture_bodies() or span is None or not span.is_recording():
+        return
+    data = getattr(req, "data", None)
+    content_type = req.get_header("Content-type") if hasattr(req, "get_header") else None
+    if (
+        isinstance(data, bytes | str)
+        and data
+        and len(data) <= BODY_READ_LIMIT
+        and _textual(content_type or "text/")
+    ):
+        text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
+        span.set_attribute("http.request.body", mask_body(text))
+
+
+def _requests_request_hook(span, prepared) -> None:
+    """requests 나가는 호출 — 보내는 본문(있으면)."""
+    if not _capture_bodies() or span is None or not span.is_recording():
+        return
+    body = getattr(prepared, "body", None)
+    content_type = (getattr(prepared, "headers", None) or {}).get("Content-Type")
+    if (
+        isinstance(body, bytes | str)
+        and body
+        and len(body) <= BODY_READ_LIMIT
+        and _textual(content_type or "text/")
+    ):
+        text = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
+        span.set_attribute("http.request.body", mask_body(text))
 
 
 def current_trace_ids() -> tuple[str, str] | None:
