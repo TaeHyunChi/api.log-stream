@@ -44,3 +44,6 @@ data:
   OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy.oncloud-ai-monitoring.svc.cluster.local:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
   OTEL_RESOURCE_ATTRIBUTES: deployment.environment=production
+  # --- 트랜잭션 검색(0.5.0, 관리자) — Tempo 조회 · 관리자 Grafana 링크(내부망 주소, 비우면 숨김) ---
+  TEMPO_URL: http://tempo.oncloud-ai-monitoring.svc.cluster.local:3200
+  GRAFANA_URL: http://192.168.201.50:30930

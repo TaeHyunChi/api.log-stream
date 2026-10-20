@@ -4,11 +4,13 @@ from flask import Blueprint
 
 from .logs import bp as logs_bp
 from .logs import stream
+from .traces import bp as traces_bp
 
 
 def register_v1(app, prefix: str = "/api/v1") -> None:
     v1 = Blueprint("v1", __name__, url_prefix=prefix)
     v1.register_blueprint(logs_bp)
+    v1.register_blueprint(traces_bp)
     app.register_blueprint(v1)
     _register_socket(app, prefix)
 

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Log Stream Service API
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Pod 로그 실시간 중계 API.
 
@@ -25,6 +25,8 @@ servers:
 tags:
   - name: logs
     description: Pod 로그 조회·실시간 중계
+  - name: traces
+    description: 트랜잭션 검색(Tempo 트레이스, 관리자 전용)
   - name: system
     description: 표준 시스템 정보
 paths:
@@ -207,6 +209,157 @@ paths:
                 $ref: '#/components/schemas/LogStreamFrame'
       security:
         - queryToken: []
+  /traces/services:
+    get:
+      tags: [traces]
+      operationId: listTraceServices
+      summary: 트레이스를 보낸 서비스 이름
+      responses:
+        '200':
+          description: 서비스 이름 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: string } }
+        '401':
+          description: code UNAUTHORIZED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: code FORBIDDEN — 관리자가 아님
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: code TEMPO_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
+  /traces/search:
+    get:
+      tags: [traces]
+      operationId: searchTraces
+      summary: 트랜잭션(트레이스) 검색 — 관리자 전용
+      description: |
+        Tempo TraceQL 로 찾는다. 조건은 같은 스팬에 모두 맞아야 한다(서비스 · 오류 · 최소 소요 시간 · 요청 주소 포함).
+        traceId 를 주면 그 트레이스 하나. 기간 기본 최근 1시간, 최대 14일. 최신순.
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: service, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [error] } }
+        - { name: minDurationMs, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: path, in: query, description: 요청 주소(http.target)에 포함된 문자열, schema: { type: string, maxLength: 100 } }
+        - { name: traceId, in: query, schema: { type: string, pattern: '^[0-9a-f]{32}$' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: 트레이스 요약 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  query: { type: string, nullable: true }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        traceId: { type: string }
+                        rootService: { type: string, nullable: true }
+                        rootName: { type: string, nullable: true }
+                        start: { type: string, format: date-time, nullable: true }
+                        durationMs: { type: number }
+        '400':
+          description: code INVALID_PARAMETER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: code UNAUTHORIZED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: code FORBIDDEN — 관리자가 아님
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: code TEMPO_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
+  /traces/{trace_id}:
+    get:
+      tags: [traces]
+      operationId: getTrace
+      summary: 트레이스 상세(스팬) — 관리자 전용
+      parameters:
+        - { name: trace_id, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{32}$' } }
+      responses:
+        '200':
+          description: 스팬 목록(시작 순) · grafanaUrl(설정했을 때)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  traceId: { type: string }
+                  start: { type: string, format: date-time }
+                  durationMs: { type: number }
+                  services: { type: array, items: { type: string } }
+                  errorCount: { type: integer }
+                  truncated: { type: boolean }
+                  grafanaUrl: { type: string, nullable: true }
+                  spans: { type: array, items: { type: object, additionalProperties: true } }
+        '400':
+          description: code INVALID_PARAMETER
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: code UNAUTHORIZED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: code FORBIDDEN — 관리자가 아님
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: code TRACE_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: code TEMPO_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+        - bearerAuth: []
   /system/info:
     get:
       tags: [system]

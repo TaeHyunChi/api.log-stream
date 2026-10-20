@@ -119,7 +119,7 @@ spec:
             - name: KONG_ROUTE_HOSTS
               value: api.oncloud-ai.co.kr
             - name: KONG_ROUTE_PATHS
-              value: /api/v1/logs
+              value: /api/v1/logs,/api/v1/traces
           resources:
             requests: { cpu: 10m, memory: 64Mi }
             limits: { cpu: 200m, memory: 128Mi }

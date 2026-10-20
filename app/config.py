@@ -60,6 +60,11 @@ class Config:
     )
 
     #: 처음 접속했을 때 거슬러 올라가 보낼 줄 수. `since` 를 주면 그쪽이 우선한다.
+    # 트랜잭션 검색(0.5.0) — Tempo(클러스터 안) · 관리자용 Grafana 링크(비우면 링크 없음)
+    TEMPO_URL = os.getenv("TEMPO_URL", "http://tempo.oncloud-ai-monitoring.svc.cluster.local:3200")
+    TEMPO_TIMEOUT = float(os.getenv("TEMPO_TIMEOUT", "10"))
+    GRAFANA_URL = os.getenv("GRAFANA_URL", "")
+    GRAFANA_TEMPO_UID = os.getenv("GRAFANA_TEMPO_UID", "tempo")
     DEFAULT_TAIL_LINES = int(os.getenv("DEFAULT_TAIL_LINES", "200"))
     MAX_TAIL_LINES = int(os.getenv("MAX_TAIL_LINES", "5000"))
 
