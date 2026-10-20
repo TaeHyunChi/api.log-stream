@@ -72,3 +72,32 @@ def test_client_request_hook_and_switch(monkeypatch):
     span = FakeSpan()
     otel._client_request_hook(span, req)
     assert span.attrs == {}
+
+
+def test_token_counts_are_not_masked():
+    out = json.loads(
+        otel.mask_body(
+            json.dumps(
+                {
+                    "max_tokens": 512,
+                    "inputTokens": 10,
+                    "usage": {"total_tokens": 3},
+                    "access_token": "t",
+                    "token": "x",
+                }
+            )
+        )
+    )
+    assert out["max_tokens"] == 512 and out["inputTokens"] == 10 and out["usage"]["total_tokens"] == 3
+    assert out["access_token"] == "****" and out["token"] == "****"
+
+
+def test_secret_query_values_masked_in_span_urls():
+    assert otel.mask_url("/api/v1/x/call?ctx=eyJhb.sig&q=1") == "/api/v1/x/call?ctx=****&q=1"
+    assert otel.mask_url("http://h/p?api_key=abc&key=k&page=2") == "http://h/p?api_key=****&key=****&page=2"
+    assert otel.mask_url("/plain/path") == "/plain/path"
+
+    span = FakeSpan()
+    span.attributes = {"http.target": "/gw/call?ctx=SIGNED&x=1", "http.method": "POST"}
+    otel._mask_span_urls(span)
+    assert span.attrs == {"http.target": "/gw/call?ctx=****&x=1"}

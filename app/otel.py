@@ -14,7 +14,9 @@
   스트리밍 응답과 파일은 싣지 않는다. 비밀로 보이는 키(password · token · key · cookie …)의 값과 JWT ·
   이메일 · 전화 · 주민번호 · 카드번호는 가리고 OTEL_BODY_MAX_CHARS(기본 4000)자로 자른다.
   나가는 호출의 응답 본문은 싣지 않는다 — 훅에서 읽으면 스트림을 소비한다(받는 서비스의 스팬에 남는다).
-  `OTEL_CAPTURE_BODIES=false` 면 본문을 싣지 않는다.
+  `OTEL_CAPTURE_BODIES=false` 면 본문을 싣지 않는다. 토큰 개수 · 한도 키(max_tokens …)는 가리지 않는다.
+- 주소 속성(http.target · http.url · url.full)의 비밀 쿼리 값(ctx · token · api_key · key · signature …)은
+  본문 기록과 상관없이 늘 가린다.
 - gunicorn 은 preload 없이 워커마다 create_app 을 부르므로, 배치 내보내기 스레드는 워커 안에서 생긴다.
 - 표본(RequestRootSampler): 부모 트레이스가 있으면 sampled 플래그와 상관없이 기록하고, 부모가 없으면
   들어온 요청(SERVER 스팬)만 기록한다. Kong 3.4 는 자기가 시작한 트레이스를 sampled=0 으로 넘겨서
@@ -42,6 +44,14 @@ BODY_READ_LIMIT = 256 * 1024  # 이보다 큰 본문은 읽지 않는다(스팬�
 _SECRET_KEY = re.compile(
     r"pass(word|wd)?|secret|token|authorization|api[_-]?key|credential|cookie|private[_-]?key", re.I
 )
+# "token" 이 들어가도 비밀이 아닌 키 — 토큰 개수 · 한도(max_tokens, inputTokens, token_count …)
+_NOT_SECRET_KEY = re.compile(r"tokens|token_?(count|limit|usage)|max_?token", re.I)
+# 주소의 비밀 쿼리 파라미터 — 값을 가린다(도구 게이트웨이 호출 맥락 ctx, 토큰, 키, 서명)
+_SECRET_QUERY = re.compile(
+    r"([?&](?:ctx|token|access_token|refresh_token|id_token|api_?key|key|secret|signature|sig|code)=)[^&#\s]*",
+    re.I,
+)
+_URL_ATTRS = ("http.target", "http.url", "url.full", "url.query")
 _MASKS = (
     (re.compile(r"eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}"), "[토큰]"),
     (re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+"), "[이메일]"),
@@ -85,11 +95,10 @@ def init_tracing(app: Flask) -> None:
         ids = current_trace_ids()
         if ids:
             response.headers.setdefault("X-Trace-Id", ids[0])
-        if _capture_bodies():
-            try:
-                _record_bodies(trace.get_current_span(), response)
-            except Exception:  # noqa: BLE001 - 계측이 응답을 망가뜨리면 안 된다
-                log.debug("본문을 스팬에 싣지 못했습니다", exc_info=True)
+        try:
+            _record_bodies(trace.get_current_span(), response)
+        except Exception:  # noqa: BLE001 - 계측이 응답을 망가뜨리면 안 된다
+            log.debug("본문을 스팬에 싣지 못했습니다", exc_info=True)
         return response
 
 
@@ -123,16 +132,32 @@ def mask_body(text: str) -> str:
     return text if len(text) <= limit else text[:limit] + f"…(+{len(text) - limit}자)"
 
 
+def _secret_key(key) -> bool:
+    return isinstance(key, str) and bool(_SECRET_KEY.search(key)) and not _NOT_SECRET_KEY.search(key)
+
+
+def mask_url(url: str) -> str:
+    """주소의 비밀 쿼리 값을 가린다 — `?ctx=…&q=1` → `?ctx=****&q=1`."""
+    return _SECRET_QUERY.sub(r"\1****", url) if url else url
+
+
+def _mask_span_urls(span) -> None:
+    """계측이 스팬 시작 때 실은 주소 속성에서 비밀 쿼리를 가린다(같은 키로 덮어쓴다)."""
+    attrs = getattr(span, "attributes", None) or {}
+    for key in _URL_ATTRS:
+        value = attrs.get(key)
+        if isinstance(value, str) and "=" in value:
+            masked = mask_url(value)
+            if masked != value:
+                span.set_attribute(key, masked)
+
+
 def _mask_value(value, depth: int = 0):
     if depth > 20:
         return value
     if isinstance(value, dict):
         return {
-            k: (
-                "****"
-                if isinstance(k, str) and _SECRET_KEY.search(k) and v not in (None, "")
-                else _mask_value(v, depth + 1)
-            )
+            k: ("****" if _secret_key(k) and v not in (None, "") else _mask_value(v, depth + 1))
             for k, v in value.items()
         }
     if isinstance(value, list):
@@ -142,6 +167,9 @@ def _mask_value(value, depth: int = 0):
 
 def _record_bodies(span, response) -> None:
     if span is None or not span.is_recording():
+        return
+    _mask_span_urls(span)
+    if not _capture_bodies():
         return
     length = request.content_length
     if length and length <= BODY_READ_LIMIT and _textual(request.content_type):
@@ -203,8 +231,11 @@ def _instrument_clients() -> None:
 
 
 def _client_request_hook(span, req) -> None:
-    """urllib 나가는 호출 — 보내는 본문(있으면). 응답 본문은 읽지 않는다(스트림 소비)."""
-    if not _capture_bodies() or span is None or not span.is_recording():
+    """urllib 나가는 호출 — 주소의 비밀 쿼리를 가리고, 보내는 본문(있으면). 응답 본문은 읽지 않는다."""
+    if span is None or not span.is_recording():
+        return
+    _mask_span_urls(span)
+    if not _capture_bodies():
         return
     data = getattr(req, "data", None)
     content_type = req.get_header("Content-type") if hasattr(req, "get_header") else None
@@ -219,8 +250,11 @@ def _client_request_hook(span, req) -> None:
 
 
 def _requests_request_hook(span, prepared) -> None:
-    """requests 나가는 호출 — 보내는 본문(있으면)."""
-    if not _capture_bodies() or span is None or not span.is_recording():
+    """requests 나가는 호출 — 주소의 비밀 쿼리를 가리고, 보내는 본문(있으면)."""
+    if span is None or not span.is_recording():
+        return
+    _mask_span_urls(span)
+    if not _capture_bodies():
         return
     body = getattr(prepared, "body", None)
     content_type = (getattr(prepared, "headers", None) or {}).get("Content-Type")
