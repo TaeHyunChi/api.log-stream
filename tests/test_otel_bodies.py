@@ -101,3 +101,15 @@ def test_secret_query_values_masked_in_span_urls():
     span.attributes = {"http.target": "/gw/call?ctx=SIGNED&x=1", "http.method": "POST"}
     otel._mask_span_urls(span)
     assert span.attrs == {"http.target": "/gw/call?ctx=****&x=1"}
+
+
+def test_signed_urls_in_bodies_are_masked():
+    """첨부 Access URL(`?exp=&sig=`)과 presigned URL 의 서명 값은 본문에서도 가린다(2026-10-24)."""
+    body = (
+        '{"userContent": "파일: http://agent-service/api/v1/agent-files/f1/content?exp=123&sig=AbC_-9 끝", '
+        '"u": "https://minio/x?X-Amz-Credential=AK%2F1&X-Amz-Signature=deadbeef&a=1"}'
+    )
+    text = otel.mask_body(body)
+    assert "sig=****" in text and "AbC_-9" not in text and "exp=123" in text
+    assert "deadbeef" not in text and "AK%2F1" not in text and "a=1" in text
+    assert otel.mask_url("/x?X-Amz-Signature=abc&q=1") == "/x?X-Amz-Signature=****&q=1"

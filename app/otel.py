@@ -48,7 +48,13 @@ _SECRET_KEY = re.compile(
 _NOT_SECRET_KEY = re.compile(r"tokens|token_?(count|limit|usage)|max_?token", re.I)
 # 주소의 비밀 쿼리 파라미터 — 값을 가린다(도구 게이트웨이 호출 맥락 ctx, 토큰, 키, 서명)
 _SECRET_QUERY = re.compile(
-    r"([?&](?:ctx|token|access_token|refresh_token|id_token|api_?key|key|secret|signature|sig|code)=)[^&#\s]*",
+    r"([?&](?:ctx|token|access_token|refresh_token|id_token|api_?key|key|secret|signature|sig|code"
+    r"|x-amz-signature|x-amz-credential|x-amz-security-token)=)[^&#\s]*",
+    re.I,
+)
+# 본문 안의 서명된 주소(에이전트 첨부 Access URL `?exp=&sig=` · presigned URL) — 값만 가린다(2026-10-24).
+_SIGNED_IN_BODY = re.compile(
+    r"([?&](?:sig|signature|ctx|x-amz-signature|x-amz-credential|x-amz-security-token)=)[^&\s\"'\\<]+",
     re.I,
 )
 _URL_ATTRS = ("http.target", "http.url", "url.full", "url.query")
@@ -129,6 +135,7 @@ def mask_body(text: str) -> str:
         pass
     for pattern, label in _MASKS:
         text = pattern.sub(label, text)
+    text = _SIGNED_IN_BODY.sub(r"\1****", text)
     return text if len(text) <= limit else text[:limit] + f"…(+{len(text) - limit}자)"
 
 
